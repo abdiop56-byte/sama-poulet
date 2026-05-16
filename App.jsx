@@ -762,9 +762,9 @@ function Associes({ depenses, ventes, userInfo, onLogout, presences = {} }) {
   const benefice = Math.max(totalV - totalDep, 0);
 
   const emailMap = {
-    "Alune": "fondateur@samapoulet_com",
-    "Laye": "laye@samapoulet_com",
-    "Daff": "daff@samapoulet_com",
+    "Alune": "fondateur_samapoulet_com",
+    "Laye": "laye_samapoulet_com",
+    "Daff": "daff_samapoulet_com",
   };
 
   const getPresence = (nom) => {
