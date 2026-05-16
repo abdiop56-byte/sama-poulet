@@ -1723,24 +1723,39 @@ export default function App() {
 
   if (!user) return <Login />;
 
-  const tabs = [
+  const mainTabs = [
     { id: "dashboard", icon: "📊", label: "Accueil" },
     { id: "suivi", icon: "🐔", label: "Suivi" },
     { id: "finances", icon: "💰", label: "Finances" },
-    { id: "analytics", icon: "📈", label: "Stats" },
-    { id: "calcul", icon: "🧮", label: "Calcul" },
-    { id: "rapport", icon: "📋", label: "Rapport" },
     { id: "chat", icon: "💬", label: "Chat" },
+    { id: "more", icon: "☰", label: "Plus" },
+  ];
+
+  const moreTabs = [
+    { id: "analytics", icon: "📈", label: "Stats" },
+    { id: "calcul", icon: "🧮", label: "Calculateur" },
+    { id: "rapport", icon: "📋", label: "Rapport" },
     { id: "clients", icon: "👥", label: "Clients" },
-    { id: "fournisseurs", icon: "🏪", label: "Fourniss." },
+    { id: "fournisseurs", icon: "🏪", label: "Fournisseurs" },
     { id: "sante", icon: "💉", label: "Santé" },
     { id: "strategie", icon: "🚀", label: "Stratégie" },
     { id: "associes", icon: "🤝", label: "Associés" },
     { id: "bandes", icon: "🐣", label: "Bandes" },
   ];
 
+  const isMainTab = mainTabs.some(t => t.id === tab);
+  const activeLabel = [...mainTabs, ...moreTabs].find(t => t.id === tab)?.label || "";
+
   return (
     <div style={S.app}>
+      {/* Header secondaire pour les onglets "Plus" */}
+      {!isMainTab && tab !== "more" && (
+        <div style={{ background: "#0F2940", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => setTab("more")} style={{ background: "none", border: "none", color: "#C9A84C", fontSize: 18, cursor: "pointer", padding: 0 }}>←</button>
+          <span style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>{moreTabs.find(t => t.id === tab)?.icon} {activeLabel}</span>
+        </div>
+      )}
+
       {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} />}
       {tab === "suivi" && <SuiviQuotidien suivi={suivi} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} />}
       {tab === "finances" && <Finances depenses={depenses} ventes={ventes} userInfo={userInfo} bandeActive={bandeActive} bandeCfg={bandeCfg} setBandeCfg={setBandeCfg} />}
@@ -1755,13 +1770,37 @@ export default function App() {
       {tab === "associes" && <Associes depenses={depenses} ventes={ventes} userInfo={userInfo} onLogout={() => signOut(auth)} presences={presences} />}
       {tab === "bandes" && <GestionBandes bandes={bandes} bandeActive={bandeActive} setBandeActive={setBandeActive} userInfo={userInfo} />}
 
-      <div style={{ ...S.nav, overflowX: "auto", justifyContent: "flex-start", gap: 0, padding: "8px 4px 12px" }}>
-        {tabs.map(t => (
-          <div key={t.id} style={{ ...S.navItem(tab === t.id), minWidth: 50, padding: "0 3px" }} onClick={() => setTab(t.id)}>
-            <span style={{ fontSize: 19 }}>{t.icon}</span>
-            <span style={{ fontSize: 8, fontWeight: tab === t.id ? 700 : 500, color: tab === t.id ? "#1A5276" : "#888", whiteSpace: "nowrap" }}>{t.label}</span>
+      {/* Menu "Plus" */}
+      {tab === "more" && (
+        <div style={S.section}>
+          <div style={S.header}>
+            <p style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>☰ Menu</p>
+            <p style={{ fontSize: 12, opacity: 0.7, margin: "4px 0 0" }}>Toutes les fonctionnalités</p>
           </div>
-        ))}
+          <div style={{ height: 16 }} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {moreTabs.map(t => (
+              <div key={t.id} onClick={() => setTab(t.id)}
+                style={{ background: "#fff", borderRadius: 16, padding: "20px 16px", textAlign: "center", cursor: "pointer", boxShadow: "0 2px 12px rgba(0,0,0,0.07)", transition: "transform 0.1s", border: "1.5px solid #F0F4F8" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>{t.icon}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0F2940" }}>{t.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Barre de navigation fixe en bas */}
+      <div style={S.nav}>
+        {mainTabs.map(t => {
+          const isActive = t.id === "more" ? tab === "more" || moreTabs.some(m => m.id === tab) : tab === t.id;
+          return (
+            <div key={t.id} style={S.navItem(isActive)} onClick={() => setTab(t.id)}>
+              <span style={{ fontSize: 22 }}>{t.icon}</span>
+              <span style={{ fontSize: 9, fontWeight: isActive ? 700 : 500, color: isActive ? "#1A5276" : "#888" }}>{t.label}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
