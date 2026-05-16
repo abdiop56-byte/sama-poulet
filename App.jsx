@@ -1493,6 +1493,263 @@ function Rapport({ suivi, depenses, ventes, vaccins, bandeCfg, incidents }) {
   );
 }
 
+// ── GALERIE PHOTOS ────────────────────────────────────────────────
+function GaleriePhotos({ userInfo, bandeActive }) {
+  const [photos, setPhotos] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ titre: "", categorie: "Poulets", notes: "", photoBase64: "" });
+  const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    const q = query(collection(db, "samapoulet", bandeActive, "photos"), orderBy("createdAt", "desc"));
+    return onSnapshot(q, snap => setPhotos(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [bandeActive]);
+
+  const handlePhoto = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    // Compresser en base64
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 800;
+        let w = img.width, h = img.height;
+        if (w > MAX) { h = h * MAX / w; w = MAX; }
+        if (h > MAX) { w = w * MAX / h; h = MAX; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        const b64 = canvas.toDataURL("image/jpeg", 0.7);
+        setForm(f => ({ ...f, photoBase64: b64 }));
+        setPreview(b64);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const save = async () => {
+    if (!form.photoBase64) return;
+    setUploading(true);
+    await addDoc(collection(db, "samapoulet", bandeActive, "photos"), {
+      ...form, ...makeSig(userInfo),
+      date: new Date().toLocaleDateString("fr-FR"),
+    });
+    setForm({ titre: "", categorie: "Poulets", notes: "", photoBase64: "" });
+    setPreview(null);
+    setShowAdd(false);
+    setUploading(false);
+  };
+
+  const del = async (id) => { if (window.confirm("Supprimer cette photo ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "photos", id)); };
+
+  const cats = ["Poulets", "Incident sanitaire", "Vente", "Infrastructure", "Autre"];
+  const catColors = { "Poulets": "#1E8449", "Incident sanitaire": "#C0392B", "Vente": "#1A5276", "Infrastructure": "#E67E22", "Autre": "#888" };
+
+  return (
+    <div style={S.section}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <p style={S.sectionTitle}>📸 Galerie Photos</p>
+        <button onClick={() => setShowAdd(true)} style={S.btnSm("#1A5276")}>+ Photo</button>
+      </div>
+
+      <div style={S.kpiRow}>
+        <div style={S.kpi("#1A5276")}><div style={S.kpiVal}>{photos.length}</div><div style={S.kpiLbl}>Photos prises</div></div>
+        <div style={S.kpi("#1E8449")}><div style={S.kpiVal}>{photos.filter(p => p.categorie === "Incident sanitaire").length}</div><div style={S.kpiLbl}>Incidents photo</div></div>
+      </div>
+
+      {photos.length === 0
+        ? <div style={{ ...S.card, textAlign: "center", padding: 32, color: "#AAB7B8" }}><div style={{ fontSize: 40 }}>📷</div><p>Aucune photo pour l'instant</p><p style={{ fontSize: 12 }}>Prenez des photos des poulets, incidents, ventes...</p></div>
+        : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {photos.map(p => (
+              <div key={p.id} style={{ background: "#fff", borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+                <div style={{ position: "relative" }}>
+                  <img src={p.photoBase64} alt={p.titre} style={{ width: "100%", height: 120, objectFit: "cover" }} />
+                  <button onClick={() => del(p.id)} style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 20, width: 24, height: 24, cursor: "pointer", color: "#fff", fontSize: 11 }}>🗑️</button>
+                  <span style={{ position: "absolute", bottom: 6, left: 6, background: (catColors[p.categorie] || "#888") + "CC", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 9, fontWeight: 700 }}>{p.categorie}</span>
+                </div>
+                <div style={{ padding: "8px 10px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: "#0F2940" }}>{p.titre || "Sans titre"}</div>
+                  <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>{p.date} • {p.auteur}</div>
+                  {p.notes && <div style={{ fontSize: 10, color: "#666", fontStyle: "italic", marginTop: 2 }}>"{p.notes}"</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      {showAdd && (
+        <Modal title="Ajouter une photo" onClose={() => { setShowAdd(false); setPreview(null); setForm({ titre: "", categorie: "Poulets", notes: "", photoBase64: "" }); }}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 6 }}>📷 Prendre ou choisir une photo</label>
+            <input type="file" accept="image/*" capture="environment" onChange={handlePhoto}
+              style={{ width: "100%", padding: "10px", borderRadius: 10, border: "1.5px dashed #1A5276", background: "#F8FAFC", cursor: "pointer", boxSizing: "border-box" }} />
+          </div>
+          {preview && <img src={preview} alt="preview" style={{ width: "100%", borderRadius: 10, marginBottom: 10, maxHeight: 200, objectFit: "cover" }} />}
+          <Field label="Titre" type="text" val={form.titre} set={v => setForm(p => ({ ...p, titre: v }))} />
+          <Field label="Catégorie" val={form.categorie} set={v => setForm(p => ({ ...p, categorie: v }))} options={cats} />
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 2 }}>Notes</label>
+          <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} style={{ ...S.input, height: 60, resize: "none" }} placeholder="Description de la photo..." />
+          <button onClick={save} disabled={!form.photoBase64 || uploading} style={{ ...S.btn("#1A5276"), opacity: !form.photoBase64 || uploading ? 0.6 : 1 }}>
+            {uploading ? "⏳ Enregistrement..." : "✅ Enregistrer la photo"}
+          </button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── EXPORT PDF ────────────────────────────────────────────────────
+function ExportPDF({ suivi, depenses, ventes, vaccins, bandeCfg, incidents, userInfo }) {
+  const poussins = bandeCfg?.poussinsDepart || 450;
+  const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
+  const effectif = poussins - totalMorts;
+  const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
+  const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
+  const resultat = totalV - totalDep;
+  const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const dateDebut = bandeCfg?.dateDebut || "2026-05-15";
+  const joursEcoules = Math.max(Math.floor((new Date() - new Date(dateDebut)) / 86400000) + 1, 1);
+  const semaine = Math.min(Math.ceil(joursEcoules / 7), 8);
+  const stock = bandeCfg?.stockAliments || 0;
+
+  const genererPDF = () => {
+    const html = `
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Rapport Sama Poulet — Bande 2</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+  h1 { color: #0F2940; border-bottom: 3px solid #C9A84C; padding-bottom: 10px; }
+  h2 { color: #1A5276; margin-top: 24px; font-size: 16px; }
+  .header { background: #0F2940; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+  .header h1 { color: white; border-bottom: 1px solid rgba(255,255,255,0.3); }
+  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+  .kpi { background: #f5f5f5; border-radius: 8px; padding: 12px; text-align: center; }
+  .kpi-val { font-size: 22px; font-weight: bold; color: #0F2940; }
+  .kpi-lbl { font-size: 11px; color: #888; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  th { background: #0F2940; color: white; padding: 8px; text-align: left; }
+  td { padding: 6px 8px; border-bottom: 1px solid #eee; }
+  tr:nth-child(even) { background: #f9f9f9; }
+  .positif { color: #1E8449; font-weight: bold; }
+  .negatif { color: #C0392B; font-weight: bold; }
+  .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #888; border-top: 1px solid #eee; padding-top: 10px; }
+  .alerte { background: #FFF3CD; border-left: 4px solid #F59E0B; padding: 8px 12px; margin: 8px 0; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🐓 SAMA POULET — Rapport Bande 2</h1>
+  <p>Keur Madaro, Thiès • Généré le ${new Date().toLocaleDateString("fr-FR")} à ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} • Par ${userInfo?.nom}</p>
+  <p>Semaine ${semaine}/6 • Objectif : ${bandeCfg?.objectif || ""}</p>
+</div>
+
+<h2>📊 TABLEAU DE BORD</h2>
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-val">${fmtN(effectif)}</div><div class="kpi-lbl">Effectif actuel</div></div>
+  <div class="kpi"><div class="kpi-val">${fmtN(totalMorts)}</div><div class="kpi-lbl">Morts (${((totalMorts/poussins)*100).toFixed(1)}%)</div></div>
+  <div class="kpi"><div class="kpi-val">${fmtN(nbVendus)}</div><div class="kpi-lbl">Vendus</div></div>
+  <div class="kpi"><div class="kpi-val">${fmt(totalV)}</div><div class="kpi-lbl">CA total</div></div>
+  <div class="kpi"><div class="kpi-val">${fmt(totalDep)}</div><div class="kpi-lbl">Investissement</div></div>
+  <div class="kpi"><div class="kpi-val ${resultat >= 0 ? "positif" : "negatif"}">${fmt(Math.abs(resultat))}</div><div class="kpi-lbl">${resultat >= 0 ? "✅ Bénéfice" : "❌ Perte"}</div></div>
+</div>
+
+${stock < 50 ? `<div class="alerte">⚠️ Stock aliments critique : ${fmtN(stock)} kg — approvisionner urgent !</div>` : ""}
+
+<h2>💸 DÉPENSES DÉTAILLÉES</h2>
+<table>
+  <tr><th>Date</th><th>Catégorie</th><th>Description</th><th>Montant</th><th>Par</th></tr>
+  ${depenses.map(d => `<tr><td>${d.date || ""}</td><td>${d.categorie || ""}</td><td>${d.description || ""}</td><td class="negatif">${fmt(d.montant)}</td><td>${d.auteur || ""}</td></tr>`).join("")}
+  <tr style="background:#f0f0f0;font-weight:bold"><td colspan="3">TOTAL</td><td class="negatif">${fmt(totalDep)}</td><td></td></tr>
+</table>
+
+<h2>🛒 VENTES DÉTAILLÉES</h2>
+<table>
+  <tr><th>Date</th><th>Client</th><th>Canal</th><th>Nb poulets</th><th>Prix unit.</th><th>Total</th><th>Par</th></tr>
+  ${ventes.map(v => `<tr><td>${v.date || ""}</td><td>${v.client || ""}</td><td>${v.canal || ""}</td><td>${v.nbPoulets || 0}</td><td>${fmt(v.prixUnit)}</td><td class="positif">${fmt(v.total)}</td><td>${v.auteur || ""}</td></tr>`).join("")}
+  <tr style="background:#f0f0f0;font-weight:bold"><td colspan="5">TOTAL</td><td class="positif">${fmt(totalV)}</td><td></td></tr>
+</table>
+
+<h2>💉 VACCINATIONS</h2>
+<table>
+  <tr><th>Vaccin</th><th>Semaine</th><th>Date prévue</th><th>Statut</th><th>Date réelle</th><th>Par</th></tr>
+  ${vaccins.map(v => `<tr><td>${v.vaccin}</td><td>Sem. ${v.semaine}</td><td>${v.datePrevue}</td><td>${v.fait ? "✅ Fait" : "⏳ À faire"}</td><td>${v.dateReelle || ""}</td><td>${v.auteur || ""}</td></tr>`).join("")}
+</table>
+
+${incidents && incidents.length > 0 ? `
+<h2>🚨 INCIDENTS SANITAIRES</h2>
+<table>
+  <tr><th>Date</th><th>Animaux</th><th>Symptômes</th><th>Traitement</th><th>Par</th></tr>
+  ${incidents.map(i => `<tr><td>${i.date || ""}</td><td>${i.nbAnimaux || 0}</td><td>${i.symptomes || ""}</td><td>${i.traitement || ""}</td><td>${i.auteur || ""}</td></tr>`).join("")}
+</table>` : ""}
+
+<h2>📈 RÉSUMÉ FINANCIER</h2>
+<table>
+  <tr><th>Indicateur</th><th>Valeur</th></tr>
+  <tr><td>Investissement total</td><td class="negatif">${fmt(totalDep)}</td></tr>
+  <tr><td>Chiffre d'affaires</td><td class="positif">${fmt(totalV)}</td></tr>
+  <tr><td>Résultat net</td><td class="${resultat >= 0 ? "positif" : "negatif"}">${fmt(Math.abs(resultat))} ${resultat >= 0 ? "(Bénéfice)" : "(Perte)"}</td></tr>
+  <tr><td>Dividende Alune (59%)</td><td class="positif">${fmt(Math.max(resultat, 0) * 0.59)}</td></tr>
+  <tr><td>Dividende Laye (25%)</td><td class="positif">${fmt(Math.max(resultat, 0) * 0.25)}</td></tr>
+  <tr><td>Dividende Daff (16%)</td><td class="positif">${fmt(Math.max(resultat, 0) * 0.16)}</td></tr>
+</table>
+
+<div class="footer">
+  Sama Poulet v2.3 — Keur Madaro, Thiès, Sénégal<br>
+  Document généré automatiquement le ${new Date().toLocaleDateString("fr-FR")}
+</div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `SamaPoulet_Rapport_${new Date().toLocaleDateString("fr-FR").replace(/\//g, "-")}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={S.section}>
+      <p style={S.sectionTitle}>📄 Export & Rapports</p>
+
+      <div style={{ ...S.card, background: "linear-gradient(135deg, #0F2940, #1A4A7A)", color: "#fff" }}>
+        <p style={{ fontSize: 14, fontWeight: 800, margin: "0 0 6px" }}>📊 Rapport complet PDF</p>
+        <p style={{ fontSize: 12, opacity: 0.75, margin: "0 0 14px" }}>Inclut : dépenses, ventes, vaccinations, incidents, dividendes</p>
+        <button onClick={genererPDF} style={{ background: "#C9A84C", color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, cursor: "pointer", width: "100%" }}>
+          📥 Télécharger le rapport
+        </button>
+      </div>
+
+      <div style={S.card}>
+        <p style={S.cardTitle}>📋 Ce que contient le rapport</p>
+        {["Tableau de bord complet", "Toutes les dépenses détaillées", "Toutes les ventes avec clients", "Statut vaccinations", "Incidents sanitaires", "Résumé financier + dividendes"].map((item, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #F0F4F8" }}>
+            <span style={{ color: "#1E8449", fontSize: 14 }}>✅</span>
+            <span style={{ fontSize: 13 }}>{item}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...S.card, background: "#F8F9FA" }}>
+        <p style={S.cardTitle}>💡 Comment ouvrir le rapport</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>1. Cliquez "Télécharger le rapport"</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>2. Le fichier .html se télécharge</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>3. Ouvrez-le dans Chrome → Imprimer → Enregistrer en PDF</p>
+        <p style={{ fontSize: 12, color: "#AAB7B8", marginTop: 8 }}>Compatible avec tous les appareils !</p>
+      </div>
+    </div>
+  );
+}
+
 // ── APP PRINCIPALE ────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
@@ -1591,7 +1848,7 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "#0F2940", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
       <div style={{ fontSize: 60 }}>🐓</div>
       <p style={{ color: "#C9A84C", fontSize: 22, fontWeight: 800, marginTop: 16 }}>Sama Poulet</p>
-      <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>v2.2 — Chargement...</p>
+      <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>v2.3 — Chargement...</p>
     </div>
   );
 
@@ -1609,6 +1866,8 @@ export default function App() {
     { id: "analytics", icon: "📈", label: "Stats" },
     { id: "calcul", icon: "🧮", label: "Calculateur" },
     { id: "rapport", icon: "📋", label: "Rapport" },
+    { id: "photos", icon: "📸", label: "Photos" },
+    { id: "export", icon: "📄", label: "Export PDF" },
     { id: "clients", icon: "👥", label: "Clients" },
     { id: "fournisseurs", icon: "🏪", label: "Fournisseurs" },
     { id: "sante", icon: "💉", label: "Santé" },
@@ -1636,6 +1895,8 @@ export default function App() {
       {tab === "analytics" && <Analytics suivi={suivi} depenses={depenses} ventes={ventes} bandeCfg={bandeCfg} />}
       {tab === "calcul" && <Calculateur depenses={depenses} suivi={suivi} bandeCfg={bandeCfg} />}
       {tab === "rapport" && <Rapport suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} bandeCfg={bandeCfg} incidents={incidents} />}
+      {tab === "photos" && <GaleriePhotos userInfo={userInfo} bandeActive={bandeActive} />}
+      {tab === "export" && <ExportPDF suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} bandeCfg={bandeCfg} incidents={incidents} userInfo={userInfo} />}
       {tab === "chat" && <Chat userInfo={userInfo} />}
       {tab === "clients" && <Clients userInfo={userInfo} bandeActive={bandeActive} ventes={ventes} />}
       {tab === "fournisseurs" && <Fournisseurs userInfo={userInfo} />}
