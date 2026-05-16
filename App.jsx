@@ -1346,6 +1346,149 @@ function Fournisseurs({ userInfo }) {
     </div>
   );
 }
+
+// ── CHAT INTERNE ──────────────────────────────────────────────────
+function Chat({ userInfo }) {
+  const [messages, setMessages] = useState([]);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    const q = query(collection(db, "samapoulet", "config", "chat"), orderBy("createdAt", "asc"));
+    return onSnapshot(q, snap => {
+      setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setTimeout(() => { const el = document.getElementById("chat-end"); if (el) el.scrollIntoView({ behavior: "smooth" }); }, 100);
+    });
+  }, []);
+
+  const send = async () => {
+    if (!msg.trim()) return;
+    await addDoc(collection(db, "samapoulet", "config", "chat"), {
+      texte: msg.trim(), auteur: userInfo?.nom || "—",
+      couleur: userInfo?.couleur || "#888",
+      createdAt: new Date().toISOString(),
+      heure: nowTime(),
+      date: new Date().toLocaleDateString("fr-FR"),
+    });
+    setMsg("");
+  };
+
+  const del = async (id) => { await deleteDoc(doc(db, "samapoulet", "config", "chat", id)); };
+
+  const parDate = {};
+  messages.forEach(m => { parDate[m.date] = [...(parDate[m.date] || []), m]; });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 80px)" }}>
+      <div style={{ ...S.header, paddingBottom: 12 }}>
+        <p style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>💬 Chat Sama Poulet</p>
+        <p style={{ fontSize: 12, opacity: 0.7, margin: "4px 0 0" }}>Alune • Laye • Daff</p>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
+        {Object.entries(parDate).map(([date, msgs]) => (
+          <div key={date}>
+            <div style={{ textAlign: "center", margin: "12px 0 8px" }}>
+              <span style={{ background: "#E8ECF0", color: "#888", fontSize: 11, borderRadius: 10, padding: "3px 10px" }}>{date}</span>
+            </div>
+            {msgs.map(m => {
+              const isMe = m.auteur === userInfo?.nom;
+              return (
+                <div key={m.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", marginBottom: 8, gap: 8, alignItems: "flex-end" }}>
+                  {!isMe && <div style={{ width: 30, height: 30, borderRadius: 15, background: m.couleur || "#888", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{m.auteur?.[0] || "?"}</div>}
+                  <div style={{ maxWidth: "75%" }}>
+                    {!isMe && <div style={{ fontSize: 10, color: "#888", marginBottom: 2, fontWeight: 600 }}>{m.auteur}</div>}
+                    <div style={{ background: isMe ? "#1A5276" : "#fff", color: isMe ? "#fff" : "#0F2940", borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "8px 12px", fontSize: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.1)" }}>{m.texte}</div>
+                    <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 2, textAlign: isMe ? "right" : "left" }}>{m.heure}</div>
+                  </div>
+                  {isMe && <button onClick={() => del(m.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#AAB7B8", paddingBottom: 16 }}>🗑️</button>}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        {messages.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "#AAB7B8" }}><div style={{ fontSize: 40 }}>💬</div><p>Aucun message pour l'instant</p><p style={{ fontSize: 12 }}>Commencez la conversation !</p></div>}
+        <div id="chat-end" />
+      </div>
+      <div style={{ padding: "12px 16px", background: "#fff", borderTop: "1px solid #E8ECF0", display: "flex", gap: 8, alignItems: "center" }}>
+        <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && send()}
+          placeholder="Écrire un message..." style={{ ...S.input, marginBottom: 0, flex: 1 }} />
+        <button onClick={send} style={{ background: "#1A5276", border: "none", borderRadius: 12, width: 44, height: 44, cursor: "pointer", fontSize: 20, flexShrink: 0, color: "#fff" }}>➤</button>
+      </div>
+    </div>
+  );
+}
+
+// ── RAPPORT HEBDOMADAIRE ──────────────────────────────────────────
+function Rapport({ suivi, depenses, ventes, vaccins, bandeCfg, incidents }) {
+  const poussins = bandeCfg?.poussinsDepart || 450;
+  const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
+  const effectif = poussins - totalMorts;
+  const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
+  const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
+  const resultat = totalV - totalDep;
+  const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const vaccsRestants = vaccins.filter(v => !v.fait).length;
+  const stock = bandeCfg?.stockAliments || 0;
+  const dateDebut = bandeCfg?.dateDebut || "2026-05-15";
+  const joursEcoules = Math.max(Math.floor((new Date() - new Date(dateDebut)) / 86400000) + 1, 1);
+  const semaine = Math.min(Math.ceil(joursEcoules / 7), 8);
+
+  const il7Jours = new Date(); il7Jours.setDate(il7Jours.getDate() - 7);
+  const morts7j = suivi.filter(j => new Date(j.date) >= il7Jours).reduce((s, j) => s + Number(j.morts || 0), 0);
+  const ventes7j = ventes.filter(v => new Date(v.date) >= il7Jours);
+  const ca7j = ventes7j.reduce((s, v) => s + Number(v.total || 0), 0);
+  const incidents7j = (incidents || []).filter(i => new Date(i.date) >= il7Jours);
+
+  const copyRapport = () => {
+    const txt = `🐓 RAPPORT SAMA POULET — Semaine ${semaine}\n📅 ${new Date().toLocaleDateString("fr-FR")}\n\n📊 BANDE EN COURS\n• Poussins départ : ${fmtN(poussins)}\n• Effectif actuel : ${fmtN(effectif)}\n• Morts totaux : ${fmtN(totalMorts)} (${((totalMorts/poussins)*100).toFixed(1)}%)\n• Vendus : ${fmtN(nbVendus)}\n• Restants : ${fmtN(effectif - nbVendus)}\n\n📅 CETTE SEMAINE\n• Morts : ${morts7j}\n• Ventes : ${fmt(ca7j)} (${ventes7j.length} transactions)\n• Incidents : ${incidents7j.length}\n\n💰 FINANCES\n• Investissement : ${fmt(totalDep)}\n• CA total : ${fmt(totalV)}\n• Résultat : ${resultat >= 0 ? "✅" : "❌"} ${fmt(Math.abs(resultat))}\n\n📦 STOCK ALIMENTS : ${fmtN(stock)} kg ${stock < 50 ? "⚠️ CRITIQUE" : "✅"}\n💉 VACCINATIONS RESTANTES : ${vaccsRestants}\n\nGénéré par Sama Poulet v2.2`;
+    navigator.clipboard.writeText(txt).then(() => alert("✅ Rapport copié ! Collez dans WhatsApp."));
+  };
+
+  return (
+    <div style={S.section}>
+      <p style={S.sectionTitle}>📋 Rapport Hebdomadaire</p>
+      <div style={{ ...S.card, background: "linear-gradient(135deg, #0F2940, #1A4A7A)", color: "#fff" }}>
+        <p style={{ fontSize: 13, opacity: 0.8, margin: "0 0 4px" }}>Semaine {semaine} • {new Date().toLocaleDateString("fr-FR")}</p>
+        <p style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Bande 2 — {bandeCfg?.objectif}</p>
+      </div>
+      <div style={S.card}>
+        <p style={S.cardTitle}>📅 Cette semaine</p>
+        <div style={S.kpiRow}>
+          <div style={S.kpi("#C0392B")}><div style={S.kpiVal}>{morts7j}</div><div style={S.kpiLbl}>Morts</div></div>
+          <div style={S.kpi("#1E8449")}><div style={{ fontSize: 15, fontWeight: 800 }}>{fmt(ca7j)}</div><div style={S.kpiLbl}>CA semaine</div></div>
+        </div>
+        <div style={S.kpiRow}>
+          <div style={S.kpi("#E67E22")}><div style={S.kpiVal}>{ventes7j.length}</div><div style={S.kpiLbl}>Transactions</div></div>
+          <div style={S.kpi(incidents7j.length > 0 ? "#C0392B" : "#1E8449")}><div style={S.kpiVal}>{incidents7j.length}</div><div style={S.kpiLbl}>Incidents</div></div>
+        </div>
+      </div>
+      <div style={S.card}>
+        <p style={S.cardTitle}>📊 Bilan général</p>
+        {[["Effectif actuel", fmtN(effectif), "#1A5276"], ["Taux mortalité", ((totalMorts/poussins)*100).toFixed(1)+"%", totalMorts/poussins > 0.05 ? "#C0392B" : "#1E8449"], ["Poulets vendus", fmtN(nbVendus), "#1E8449"], ["Restants à vendre", fmtN(Math.max(effectif-nbVendus,0)), "#E67E22"], ["CA total", fmt(totalV), "#1E8449"], ["Investissement", fmt(totalDep), "#C0392B"], ["Résultat net", fmt(Math.abs(resultat)), resultat >= 0 ? "#1E8449" : "#C0392B"], ["Stock aliments", fmtN(stock)+" kg", stock < 50 ? "#C0392B" : "#1E8449"], ["Vaccins restants", vaccsRestants.toString(), vaccsRestants > 0 ? "#E67E22" : "#1E8449"]].map(([l, v, c]) => (
+          <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F0F4F8" }}>
+            <span style={{ fontSize: 13, color: "#555" }}>{l}</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: c }}>{v}</span>
+          </div>
+        ))}
+      </div>
+      {(stock < 50 || vaccsRestants > 0) && (
+        <div style={S.card}>
+          <p style={S.cardTitle}>⚠️ Points d'attention</p>
+          {stock < 50 && <div style={S.alert("#C0392B")}>🚨 Stock aliments critique : {fmtN(stock)} kg</div>}
+          {vaccsRestants > 0 && <div style={S.alert("#E67E22")}>💉 {vaccsRestants} vaccination(s) à faire</div>}
+        </div>
+      )}
+      <button onClick={copyRapport} style={{ ...S.btn("#1A5276"), marginBottom: 12 }}>📋 Copier le rapport (WhatsApp)</button>
+      <div style={{ ...S.card, background: "#F8F9FA" }}>
+        <p style={S.cardTitle}>💡 Comment envoyer</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>1. Cliquez "Copier le rapport"</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>2. Ouvrez WhatsApp → groupe Sama Poulet</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>3. Collez et envoyez</p>
+        <p style={{ fontSize: 12, color: "#AAB7B8", marginTop: 8 }}>À faire chaque lundi matin !</p>
+      </div>
+    </div>
+  );
+}
+
 // ── APP PRINCIPALE ────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
