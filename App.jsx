@@ -364,9 +364,21 @@ function Finances({ depenses, ventes }) {
           ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>💸</div><p>Aucune dépense</p></div>
           : depenses.map(d => (
             <div key={d.id} style={S.card}>
-              <div style={S.row}>
-                <div><div style={{ fontWeight: 700, fontSize: 13 }}>{d.description || d.categorie}</div><div style={{ fontSize: 11, color: "#888" }}>{d.categorie} • {d.date}</div></div>
-                <span style={{ fontWeight: 800, color: "#C0392B" }}>{fmt(d.montant)}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{d.description || d.categorie}</div>
+                  <div style={{ fontSize: 11, color: "#888" }}>{d.categorie} • {d.date}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontWeight: 800, color: "#C0392B" }}>{fmt(d.montant)}</span>
+                  <button onClick={() => {
+                    if (window.confirm("Supprimer cette dépense ?")) {
+                      import("firebase/firestore").then(({ deleteDoc, doc: fDoc }) => {
+                        deleteDoc(fDoc(db, "samapoulet", "bande2", "depenses", d.id));
+                      });
+                    }
+                  }} style={{ background: "#FFF0F0", border: "none", borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 16, color: "#C0392B" }}>🗑️</button>
+                </div>
               </div>
             </div>
           ))
@@ -379,11 +391,23 @@ function Finances({ depenses, ventes }) {
           ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>🛒</div><p>Aucune vente</p></div>
           : ventes.map(v => (
             <div key={v.id} style={S.card}>
-              <div style={S.row}>
-                <div><div style={{ fontWeight: 700, fontSize: 13 }}>{v.client}</div><div style={{ fontSize: 11, color: "#888" }}>{v.nbPoulets} poulets × {fmt(v.prixUnit)} • {v.date}</div></div>
-                <span style={{ fontWeight: 800, color: "#1E8449" }}>{fmt(v.total)}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{v.client}</div>
+                  <div style={{ fontSize: 11, color: "#888" }}>{v.nbPoulets} poulets × {fmt(v.prixUnit)} • {v.date}</div>
+                  <span style={S.tag("#1A5276")}>{v.canal}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontWeight: 800, color: "#1E8449" }}>{fmt(v.total)}</span>
+                  <button onClick={() => {
+                    if (window.confirm("Supprimer cette vente ?")) {
+                      import("firebase/firestore").then(({ deleteDoc, doc: fDoc }) => {
+                        deleteDoc(fDoc(db, "samapoulet", "bande2", "ventes", v.id));
+                      });
+                    }
+                  }} style={{ background: "#F0FFF4", border: "none", borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 16, color: "#C0392B" }}>🗑️</button>
+                </div>
               </div>
-              <span style={S.tag("#1A5276")}>{v.canal}</span>
             </div>
           ))
         }
