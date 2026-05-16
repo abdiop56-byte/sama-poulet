@@ -755,11 +755,31 @@ function Strategie({ phases, setPhases, userInfo }) {
 }
 
 // ── ASSOCIÉS ──────────────────────────────────────────────────────
-function Associes({ depenses, ventes, userInfo, onLogout }) {
+function Associes({ depenses, ventes, userInfo, onLogout, presences }) {
   if (!PERMS[userInfo?.role]?.associes) return <AccessDenied />;
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
   const benefice = Math.max(totalV - totalDep, 0);
+
+  const emailMap = {
+    "Alune": "fondateur@samapoulet.com",
+    "Laye": "laye@samapoulet.com",
+    "Daff": "daff@samapoulet.com",
+  };
+
+  const getPresence = (nom) => {
+    const email = emailMap[nom];
+    return presences?.[email?.replace(/[@.]/g, "_")] || null;
+  };
+
+  const getTempsDepuis = (isoDate) => {
+    if (!isoDate) return null;
+    const diff = Math.floor((new Date() - new Date(isoDate)) / 60000);
+    if (diff < 1) return "À l'instant";
+    if (diff < 60) return `il y a ${diff} min`;
+    if (diff < 1440) return `il y a ${Math.floor(diff / 60)}h`;
+    return `il y a ${Math.floor(diff / 1440)} jour(s)`;
+  };
 
   return (
     <div style={S.section}>
@@ -796,7 +816,21 @@ function Associes({ depenses, ventes, userInfo, onLogout }) {
         <div key={a.id} style={{ ...S.card, borderTop: `4px solid ${a.couleur}` }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
             <div style={{ width: 44, height: 44, borderRadius: 22, background: a.couleur, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 15 }}>{a.parts}%</div>
-            <div><div style={{ fontWeight: 800, fontSize: 15 }}>{a.nom}</div><div style={{ fontSize: 12, color: "#888" }}>{a.role}</div></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>{a.nom}</div>
+              <div style={{ fontSize: 12, color: "#888" }}>{a.role}</div>
+              {(() => {
+                const p = getPresence(a.nom);
+                const temps = getTempsDepuis(p?.derniereConnexion);
+                return p ? (
+                  <div style={{ fontSize: 11, color: "#1E8449", marginTop: 3 }}>
+                    🟢 Dernière connexion : {p.dateConnexion} à {p.heureConnexion} ({temps})
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: "#AAB7B8", marginTop: 3 }}>⚪ Jamais connecté</div>
+                );
+              })()}
+            </div>
           </div>
           <div style={{ background: "#F8F9FA", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 12, color: "#666" }}>Dividende estimé</span>
@@ -1328,6 +1362,300 @@ export default function App() {
   const [vaccins, setVaccins] = useState([]);
   const [incidents, setIncidents] = useState([]);
   const [phases, setPhases] = useState(PHASES_INIT);
+  const [presences, setPresences] = useState({});
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        const info = USERS[u.email] || { nom: u.email.split("@")[0], role: "production", parts: 0, couleur: "#888" };
+        setUserInfo(info);
+        await setDoc(doc(db, "samapoulet", "config", "presences", u.email.replace(/[@.]/g, "_")), {
+          nom: info.nom, email: u.email, couleur: info.couleur,
+          derniereConnexion: new Date().toISOString(),
+          dateConnexion: new Date().toLocaleDateString("fr-FR"),
+          heureConnexion: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+        });
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    return onSnapshot(collection(db, "samapoulet", "config", "presences"), snap => {
+      const p = {};
+      snap.docs.forEach(d => { p[d.data().email] = d.data(); });
+      setPresences(p);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const init = async () => {
+      const ref = doc(db, "samapoulet", "bande2");
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, { numero: 2, dateDebut: "2026-05-15", poussinsDepart: 450, objectif: "Tamkharite ~25 Juin 2026", fournisseur: "À définir", statut: "active", stockAliments: 0 });
+      }
+    };
+    init();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubs = [];
+
+    unsubs.push(onSnapshot(doc(db, "samapoulet", bandeActive), snap => { if (snap.exists()) setBandeCfg(snap.data()); }));
+    unsubs.push(onSnapshot(collection(db, "samapoulet"), snap => {
+      setBandes(snap.docs.filter(d => d.id.startsWith("bande") && d.id !== "config").map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.numero || 0) - (b.numero || 0)));
+    }));
+
+    const q1 = query(collection(db, "samapoulet", bandeActive, "suiviQuotidien"), orderBy("createdAt", "desc"));
+    unsubs.push(onSnapshot(q1, s => setSuivi(s.docs.map(d => ({ id: d.id, ...d.data() })))));
+
+    const q2 = query(collection(db, "samapoulet", bandeActive, "depenses"), orderBy("createdAt", "desc"));
+    unsubs.push(onSnapshot(q2, s => setDepenses(s.docs.map(d => ({ id: d.id, ...d.data() })))));
+
+    const q3 = query(collection(db, "samapoulet", bandeActive, "ventes"), orderBy("createdAt", "desc"));
+    unsubs.push(onSnapshot(q3, s => setVentes(s.docs.map(d => ({ id: d.id, ...d.data() })))));
+
+    unsubs.push(onSnapshot(collection(db, "samapoulet", bandeActive, "vaccinations"), async snap => {
+      if (snap.empty) {
+        for (const v of VACCINS_INIT) await setDoc(doc(db, "samapoulet", bandeActive, "vaccinations", v.id), v);
+      } else {
+        setVaccins(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }
+    }));
+
+    const q5 = query(collection(db, "samapoulet", bandeActive, "incidents"), orderBy("createdAt", "desc"));
+    unsubs.push(onSnapshot(q5, s => setIncidents(s.docs.map(d => ({ id: d.id, ...d.data() })))));
+
+    unsubs.push(onSnapshot(doc(db, "samapoulet", "config", "global", "phases"), snap => {
+      if (snap.exists()) setPhases(snap.data().data);
+    }));
+
+    return () => unsubs.forEach(u => u());
+  }, [user, bandeActive]);
+
+// ── CHAT INTERNE ──────────────────────────────────────────────────
+function Chat({ userInfo }) {
+  const [messages, setMessages] = useState([]);
+  const [msg, setMsg] = useState("");
+  const endRef = useState(null);
+
+  useEffect(() => {
+    const q = query(collection(db, "samapoulet", "config", "chat"), orderBy("createdAt", "asc"));
+    return onSnapshot(q, snap => {
+      setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setTimeout(() => {
+        const el = document.getElementById("chat-end");
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    });
+  }, []);
+
+  const send = async () => {
+    if (!msg.trim()) return;
+    await addDoc(collection(db, "samapoulet", "config", "chat"), {
+      texte: msg.trim(),
+      auteur: userInfo?.nom || "—",
+      couleur: userInfo?.couleur || "#888",
+      createdAt: new Date().toISOString(),
+      heure: nowTime(),
+      date: new Date().toLocaleDateString("fr-FR"),
+    });
+    setMsg("");
+  };
+
+  const del = async (id) => { await deleteDoc(doc(db, "samapoulet", "config", "chat", id)); };
+
+  // Grouper par date
+  const parDate = {};
+  messages.forEach(m => { parDate[m.date] = [...(parDate[m.date] || []), m]; });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 80px)" }}>
+      <div style={{ ...S.header, paddingBottom: 12 }}>
+        <p style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>💬 Chat Sama Poulet</p>
+        <p style={{ fontSize: 12, opacity: 0.7, margin: "4px 0 0" }}>Alune • Laye • Daff</p>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
+        {Object.entries(parDate).map(([date, msgs]) => (
+          <div key={date}>
+            <div style={{ textAlign: "center", margin: "12px 0 8px" }}>
+              <span style={{ background: "#E8ECF0", color: "#888", fontSize: 11, borderRadius: 10, padding: "3px 10px" }}>{date}</span>
+            </div>
+            {msgs.map(m => {
+              const isMe = m.auteur === userInfo?.nom;
+              return (
+                <div key={m.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", marginBottom: 8, gap: 8, alignItems: "flex-end" }}>
+                  {!isMe && (
+                    <div style={{ width: 30, height: 30, borderRadius: 15, background: m.couleur || "#888", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+                      {m.auteur?.[0] || "?"}
+                    </div>
+                  )}
+                  <div style={{ maxWidth: "75%" }}>
+                    {!isMe && <div style={{ fontSize: 10, color: "#888", marginBottom: 2, fontWeight: 600 }}>{m.auteur}</div>}
+                    <div style={{ background: isMe ? "#1A5276" : "#fff", color: isMe ? "#fff" : "#0F2940", borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "8px 12px", fontSize: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.1)" }}>
+                      {m.texte}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 2, textAlign: isMe ? "right" : "left" }}>{m.heure}</div>
+                  </div>
+                  {isMe && <button onClick={() => del(m.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#AAB7B8", paddingBottom: 16 }}>🗑️</button>}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        <div id="chat-end" />
+      </div>
+
+      <div style={{ padding: "12px 16px", background: "#fff", borderTop: "1px solid #E8ECF0", display: "flex", gap: 8, alignItems: "center" }}>
+        <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && send()}
+          placeholder="Écrire un message..." style={{ ...S.input, marginBottom: 0, flex: 1 }} />
+        <button onClick={send} style={{ background: "#1A5276", border: "none", borderRadius: 12, width: 44, height: 44, cursor: "pointer", fontSize: 20, flexShrink: 0 }}>➤</button>
+      </div>
+    </div>
+  );
+}
+
+// ── RAPPORT HEBDOMADAIRE ──────────────────────────────────────────
+function Rapport({ suivi, depenses, ventes, vaccins, bandeCfg, incidents }) {
+  const poussins = bandeCfg?.poussinsDepart || 450;
+  const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
+  const effectif = poussins - totalMorts;
+  const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
+  const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
+  const resultat = totalV - totalDep;
+  const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const vaccsRestants = vaccins.filter(v => !v.fait).length;
+  const stock = bandeCfg?.stockAliments || 0;
+  const dateDebut = bandeCfg?.dateDebut || "2026-05-15";
+  const joursEcoules = Math.max(Math.floor((new Date() - new Date(dateDebut)) / 86400000) + 1, 1);
+  const semaine = Math.min(Math.ceil(joursEcoules / 7), 8);
+
+  // 7 derniers jours
+  const il7Jours = new Date(); il7Jours.setDate(il7Jours.getDate() - 7);
+  const suivi7j = suivi.filter(j => new Date(j.date) >= il7Jours);
+  const morts7j = suivi7j.reduce((s, j) => s + Number(j.morts || 0), 0);
+  const ventes7j = ventes.filter(v => new Date(v.date) >= il7Jours);
+  const ca7j = ventes7j.reduce((s, v) => s + Number(v.total || 0), 0);
+  const incidents7j = incidents.filter(i => new Date(i.date) >= il7Jours);
+
+  const copyRapport = () => {
+    const txt = `🐓 RAPPORT SAMA POULET — Semaine ${semaine}
+📅 ${new Date().toLocaleDateString("fr-FR")}
+
+📊 BANDE EN COURS
+• Poussins départ : ${fmtN(poussins)}
+• Effectif actuel : ${fmtN(effectif)}
+• Morts totaux : ${fmtN(totalMorts)} (${((totalMorts/poussins)*100).toFixed(1)}%)
+• Vendus : ${fmtN(nbVendus)}
+• Restants : ${fmtN(effectif - nbVendus)}
+
+📅 CETTE SEMAINE
+• Morts : ${morts7j}
+• Ventes : ${fmt(ca7j)} (${ventes7j.length} transactions)
+• Incidents : ${incidents7j.length}
+
+💰 FINANCES
+• Investissement : ${fmt(totalDep)}
+• CA total : ${fmt(totalV)}
+• Résultat : ${resultat >= 0 ? "✅" : "❌"} ${fmt(Math.abs(resultat))}
+
+📦 STOCK ALIMENTS : ${fmtN(stock)} kg ${stock < 50 ? "⚠️ CRITIQUE" : "✅"}
+💉 VACCINATIONS RESTANTES : ${vaccsRestants}
+
+Généré par Sama Poulet v2.2`;
+    navigator.clipboard.writeText(txt).then(() => alert("✅ Rapport copié ! Collez-le dans WhatsApp ou email."));
+  };
+
+  return (
+    <div style={S.section}>
+      <p style={S.sectionTitle}>📋 Rapport Hebdomadaire</p>
+
+      <div style={{ ...S.card, background: "linear-gradient(135deg, #0F2940, #1A4A7A)", color: "#fff" }}>
+        <p style={{ fontSize: 13, opacity: 0.8, margin: "0 0 4px" }}>Semaine {semaine} • {new Date().toLocaleDateString("fr-FR")}</p>
+        <p style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Bande 2 — {bandeCfg?.objectif}</p>
+      </div>
+
+      {/* Cette semaine */}
+      <div style={S.card}>
+        <p style={S.cardTitle}>📅 Cette semaine (7 derniers jours)</p>
+        <div style={S.kpiRow}>
+          <div style={S.kpi("#C0392B")}><div style={S.kpiVal}>{morts7j}</div><div style={S.kpiLbl}>Morts</div></div>
+          <div style={S.kpi("#1E8449")}><div style={{ fontSize: 15, fontWeight: 800 }}>{fmt(ca7j)}</div><div style={S.kpiLbl}>CA semaine</div></div>
+        </div>
+        <div style={S.kpiRow}>
+          <div style={S.kpi("#E67E22")}><div style={S.kpiVal}>{ventes7j.length}</div><div style={S.kpiLbl}>Transactions</div></div>
+          <div style={S.kpi(incidents7j.length > 0 ? "#C0392B" : "#1E8449")}><div style={S.kpiVal}>{incidents7j.length}</div><div style={S.kpiLbl}>Incidents</div></div>
+        </div>
+      </div>
+
+      {/* Bilan général */}
+      <div style={S.card}>
+        <p style={S.cardTitle}>📊 Bilan général bande</p>
+        {[
+          ["Effectif actuel", fmtN(effectif), "#1A5276"],
+          ["Taux mortalité", ((totalMorts/poussins)*100).toFixed(1) + "%", totalMorts/poussins > 0.05 ? "#C0392B" : "#1E8449"],
+          ["Poulets vendus", fmtN(nbVendus), "#1E8449"],
+          ["Restants à vendre", fmtN(Math.max(effectif - nbVendus, 0)), "#E67E22"],
+          ["CA total", fmt(totalV), "#1E8449"],
+          ["Investissement", fmt(totalDep), "#C0392B"],
+          ["Résultat net", fmt(Math.abs(resultat)), resultat >= 0 ? "#1E8449" : "#C0392B"],
+          ["Stock aliments", fmtN(stock) + " kg", stock < 50 ? "#C0392B" : "#1E8449"],
+          ["Vaccins restants", vaccsRestants.toString(), vaccsRestants > 0 ? "#E67E22" : "#1E8449"],
+        ].map(([l, v, c]) => (
+          <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F0F4F8" }}>
+            <span style={{ fontSize: 13, color: "#555" }}>{l}</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: c }}>{v}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Alertes */}
+      {(stock < 50 || vaccsRestants > 0 || totalMorts/poussins > 0.05) && (
+        <div style={S.card}>
+          <p style={S.cardTitle}>⚠️ Points d'attention</p>
+          {stock < 50 && <div style={S.alert("#C0392B")}>🚨 Stock aliments critique : {fmtN(stock)} kg — approvisionner urgent</div>}
+          {vaccsRestants > 0 && <div style={S.alert("#E67E22")}>💉 {vaccsRestants} vaccination(s) à faire</div>}
+          {totalMorts/poussins > 0.05 && <div style={S.alert("#C0392B")}>💀 Taux de mortalité élevé : {((totalMorts/poussins)*100).toFixed(1)}%</div>}
+        </div>
+      )}
+
+      {/* Bouton copier */}
+      <button onClick={copyRapport} style={{ ...S.btn("#1A5276"), marginBottom: 12 }}>
+        📋 Copier le rapport (WhatsApp / Email)
+      </button>
+
+      <div style={{ ...S.card, background: "#F8F9FA" }}>
+        <p style={S.cardTitle}>💡 Comment envoyer le rapport</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>1. Cliquez "Copier le rapport" ci-dessus</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>2. Ouvrez WhatsApp → groupe Sama Poulet</p>
+        <p style={{ fontSize: 13, color: "#555", margin: "4px 0" }}>3. Collez et envoyez</p>
+        <p style={{ fontSize: 12, color: "#AAB7B8", marginTop: 8 }}>À faire chaque lundi matin !</p>
+      </div>
+    </div>
+  );
+}
+
+// ── APP PRINCIPALE ────────────────────────────────────────────────
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [userInfo, setUserInfo] = useState(null);
+  const [tab, setTab] = useState("dashboard");
+  const [loading, setLoading] = useState(true);
+  const [bandeActive, setBandeActive] = useState("bande2");
+  const [bandes, setBandes] = useState([]);
+  const [bandeCfg, setBandeCfg] = useState({ dateDebut: "2026-05-15", poussinsDepart: 450, objectif: "Tamkharite ~25 Juin 2026", stockAliments: 0 });
+  const [suivi, setSuivi] = useState([]);
+  const [depenses, setDepenses] = useState([]);
+  const [ventes, setVentes] = useState([]);
+  const [vaccins, setVaccins] = useState([]);
+  const [incidents, setIncidents] = useState([]);
+  const [phases, setPhases] = useState(PHASES_INIT);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
@@ -1389,7 +1717,7 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "#0F2940", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
       <div style={{ fontSize: 60 }}>🐓</div>
       <p style={{ color: "#C9A84C", fontSize: 22, fontWeight: 800, marginTop: 16 }}>Sama Poulet</p>
-      <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>v2.1 — Chargement...</p>
+      <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>v2.2 — Chargement...</p>
     </div>
   );
 
@@ -1401,6 +1729,8 @@ export default function App() {
     { id: "finances", icon: "💰", label: "Finances" },
     { id: "analytics", icon: "📈", label: "Stats" },
     { id: "calcul", icon: "🧮", label: "Calcul" },
+    { id: "rapport", icon: "📋", label: "Rapport" },
+    { id: "chat", icon: "💬", label: "Chat" },
     { id: "clients", icon: "👥", label: "Clients" },
     { id: "fournisseurs", icon: "🏪", label: "Fourniss." },
     { id: "sante", icon: "💉", label: "Santé" },
@@ -1409,10 +1739,6 @@ export default function App() {
     { id: "bandes", icon: "🐣", label: "Bandes" },
   ];
 
-  // Nav visible max 6 tabs + scroll
-  const mainTabs = tabs.slice(0, 6);
-  const moreTabs = tabs.slice(6);
-
   return (
     <div style={S.app}>
       {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} />}
@@ -1420,17 +1746,19 @@ export default function App() {
       {tab === "finances" && <Finances depenses={depenses} ventes={ventes} userInfo={userInfo} bandeActive={bandeActive} bandeCfg={bandeCfg} setBandeCfg={setBandeCfg} />}
       {tab === "analytics" && <Analytics suivi={suivi} depenses={depenses} ventes={ventes} bandeCfg={bandeCfg} />}
       {tab === "calcul" && <Calculateur depenses={depenses} suivi={suivi} bandeCfg={bandeCfg} />}
+      {tab === "rapport" && <Rapport suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} bandeCfg={bandeCfg} incidents={incidents} />}
+      {tab === "chat" && <Chat userInfo={userInfo} />}
       {tab === "clients" && <Clients userInfo={userInfo} bandeActive={bandeActive} ventes={ventes} />}
       {tab === "fournisseurs" && <Fournisseurs userInfo={userInfo} />}
       {tab === "sante" && <Sante vaccins={vaccins} incidents={incidents} userInfo={userInfo} bandeActive={bandeActive} />}
       {tab === "strategie" && <Strategie phases={phases} setPhases={setPhases} userInfo={userInfo} />}
-      {tab === "associes" && <Associes depenses={depenses} ventes={ventes} userInfo={userInfo} onLogout={() => signOut(auth)} />}
+      {tab === "associes" && <Associes depenses={depenses} ventes={ventes} userInfo={userInfo} onLogout={() => signOut(auth)} presences={presences} />}
       {tab === "bandes" && <GestionBandes bandes={bandes} bandeActive={bandeActive} setBandeActive={setBandeActive} userInfo={userInfo} />}
 
-      <div style={{ ...S.nav, overflowX: "auto", justifyContent: "flex-start", gap: 0, padding: "8px 8px 12px" }}>
+      <div style={{ ...S.nav, overflowX: "auto", justifyContent: "flex-start", gap: 0, padding: "8px 4px 12px" }}>
         {tabs.map(t => (
-          <div key={t.id} style={{ ...S.navItem(tab === t.id), minWidth: 52, padding: "0 4px" }} onClick={() => setTab(t.id)}>
-            <span style={{ fontSize: 20 }}>{t.icon}</span>
+          <div key={t.id} style={{ ...S.navItem(tab === t.id), minWidth: 50, padding: "0 3px" }} onClick={() => setTab(t.id)}>
+            <span style={{ fontSize: 19 }}>{t.icon}</span>
             <span style={{ fontSize: 8, fontWeight: tab === t.id ? 700 : 500, color: tab === t.id ? "#1A5276" : "#888", whiteSpace: "nowrap" }}>{t.label}</span>
           </div>
         ))}
