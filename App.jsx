@@ -755,30 +755,34 @@ function Strategie({ phases, setPhases, userInfo }) {
 }
 
 // ── ASSOCIÉS ──────────────────────────────────────────────────────
-function Associes({ depenses, ventes, userInfo, onLogout, presences }) {
+function Associes({ depenses, ventes, userInfo, onLogout, presences = {} }) {
   if (!PERMS[userInfo?.role]?.associes) return <AccessDenied />;
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
   const benefice = Math.max(totalV - totalDep, 0);
 
   const emailMap = {
-    "Alune": "fondateur@samapoulet.com",
-    "Laye": "laye@samapoulet.com",
-    "Daff": "daff@samapoulet.com",
+    "Alune": "fondateur@samapoulet_com",
+    "Laye": "laye@samapoulet_com",
+    "Daff": "daff@samapoulet_com",
   };
 
   const getPresence = (nom) => {
-    const email = emailMap[nom];
-    return presences?.[email?.replace(/[@.]/g, "_")] || null;
+    try {
+      const key = emailMap[nom];
+      return (presences && key && presences[key]) ? presences[key] : null;
+    } catch { return null; }
   };
 
   const getTempsDepuis = (isoDate) => {
-    if (!isoDate) return null;
-    const diff = Math.floor((new Date() - new Date(isoDate)) / 60000);
-    if (diff < 1) return "À l'instant";
-    if (diff < 60) return `il y a ${diff} min`;
-    if (diff < 1440) return `il y a ${Math.floor(diff / 60)}h`;
-    return `il y a ${Math.floor(diff / 1440)} jour(s)`;
+    try {
+      if (!isoDate) return null;
+      const diff = Math.floor((new Date() - new Date(isoDate)) / 60000);
+      if (diff < 1) return "À l'instant";
+      if (diff < 60) return `il y a ${diff} min`;
+      if (diff < 1440) return `il y a ${Math.floor(diff / 60)}h`;
+      return `il y a ${Math.floor(diff / 1440)} jour(s)`;
+    } catch { return null; }
   };
 
   return (
@@ -1504,14 +1508,36 @@ export default function App() {
   const [vaccins, setVaccins] = useState([]);
   const [incidents, setIncidents] = useState([]);
   const [phases, setPhases] = useState(PHASES_INIT);
+  const [presences, setPresences] = useState({});
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => {
+    return onAuthStateChanged(auth, async (u) => {
       setUser(u);
-      if (u) setUserInfo(USERS[u.email] || { nom: u.email.split("@")[0], role: "production", parts: 0, couleur: "#888" });
+      if (u) {
+        const info = USERS[u.email] || { nom: u.email.split("@")[0], role: "production", parts: 0, couleur: "#888" };
+        setUserInfo(info);
+        try {
+          const key = u.email.replace(/[@.]/g, "_");
+          await setDoc(doc(db, "samapoulet", "config", "presences", key), {
+            nom: info.nom, email: u.email, couleur: info.couleur,
+            derniereConnexion: new Date().toISOString(),
+            dateConnexion: new Date().toLocaleDateString("fr-FR"),
+            heureConnexion: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+          });
+        } catch(e) { console.log("Presence error:", e); }
+      }
       setLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    return onSnapshot(collection(db, "samapoulet", "config", "presences"), snap => {
+      const p = {};
+      snap.docs.forEach(d => { p[d.id] = d.data(); });
+      setPresences(p);
+    });
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
