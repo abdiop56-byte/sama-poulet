@@ -322,6 +322,8 @@ function Finances({ depenses, ventes, userInfo }) {
   const [showVente, setShowVente] = useState(false);
   const [dep, setDep] = useState({ date: "", categorie: "", description: "", montant: "" });
   const [vente, setVente] = useState({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" });
+  const [editDepId, setEditDepId] = useState(null);
+  const [editVenteId, setEditVenteId] = useState(null);
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
   const resultat = totalV - totalDep;
@@ -330,23 +332,45 @@ function Finances({ depenses, ventes, userInfo }) {
 
   const saveDep = async () => {
     if (!dep.montant) return;
-    await addDoc(collection(db, "samapoulet", "bande2", "depenses"), {
-      ...dep, montant: Number(dep.montant), createdAt: new Date().toISOString(),
-      auteur: userInfo?.nom || "Inconnu",
-      heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
-    });
+    const data = {
+      ...dep, montant: Number(dep.montant),
+      modifiePar: userInfo?.nom || "Inconnu",
+      heureModif: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    };
+    if (editDepId) {
+      const { updateDoc, doc: fDoc } = await import("firebase/firestore");
+      await updateDoc(fDoc(db, "samapoulet", "bande2", "depenses", editDepId), data);
+      setEditDepId(null);
+    } else {
+      await addDoc(collection(db, "samapoulet", "bande2", "depenses"), {
+        ...data, createdAt: new Date().toISOString(),
+        auteur: userInfo?.nom || "Inconnu",
+        heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+      });
+    }
     setDep({ date: "", categorie: "", description: "", montant: "" });
     setShowDep(false);
   };
 
   const saveVente = async () => {
     if (!vente.nbPoulets || !vente.prixUnit) return;
-    await addDoc(collection(db, "samapoulet", "bande2", "ventes"), {
-      ...vente, nbPoulets: Number(vente.nbPoulets), prixUnit: Number(vente.prixUnit),
-      total: Number(vente.nbPoulets) * Number(vente.prixUnit), createdAt: new Date().toISOString(),
-      auteur: userInfo?.nom || "Inconnu",
-      heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
-    });
+    const total = Number(vente.nbPoulets) * Number(vente.prixUnit);
+    const data = {
+      ...vente, nbPoulets: Number(vente.nbPoulets), prixUnit: Number(vente.prixUnit), total,
+      modifiePar: userInfo?.nom || "Inconnu",
+      heureModif: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    };
+    if (editVenteId) {
+      const { updateDoc, doc: fDoc } = await import("firebase/firestore");
+      await updateDoc(fDoc(db, "samapoulet", "bande2", "ventes", editVenteId), data);
+      setEditVenteId(null);
+    } else {
+      await addDoc(collection(db, "samapoulet", "bande2", "ventes"), {
+        ...data, createdAt: new Date().toISOString(),
+        auteur: userInfo?.nom || "Inconnu",
+        heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+      });
+    }
     setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" });
     setShowVente(false);
   };
@@ -381,17 +405,21 @@ function Finances({ depenses, ventes, userInfo }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{d.description || d.categorie}</div>
                   <div style={{ fontSize: 11, color: "#888" }}>{d.categorie} • {d.date}</div>
-                  <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 3 }}>✍️ {d.auteur || "—"} • {d.heureAction || ""}</div>
+                  <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 3 }}>✍️ {d.auteur || "—"} • {d.heureAction || ""}
+                    {d.modifiePar && <span style={{ color: "#E67E22" }}> • ✏️ modifié par {d.modifiePar} à {d.heureModif}</span>}
+                  </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ fontWeight: 800, color: "#C0392B" }}>{fmt(d.montant)}</span>
+                  <button onClick={() => { setDep({ date: d.date, categorie: d.categorie, description: d.description, montant: d.montant }); setEditDepId(d.id); setShowDep(true); }}
+                    style={{ background: "#EBF5FB", border: "none", borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 16 }}>✏️</button>
                   <button onClick={() => {
                     if (window.confirm("Supprimer cette dépense ?")) {
                       import("firebase/firestore").then(({ deleteDoc, doc: fDoc }) => {
                         deleteDoc(fDoc(db, "samapoulet", "bande2", "depenses", d.id));
                       });
                     }
-                  }} style={{ background: "#FFF0F0", border: "none", borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 16, color: "#C0392B" }}>🗑️</button>
+                  }} style={{ background: "#FFF0F0", border: "none", borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 16 }}>🗑️</button>
                 </div>
               </div>
             </div>
@@ -409,11 +437,15 @@ function Finances({ depenses, ventes, userInfo }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{v.client}</div>
                   <div style={{ fontSize: 11, color: "#888" }}>{v.nbPoulets} poulets × {fmt(v.prixUnit)} • {v.date}</div>
-                  <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 3 }}>✍️ {v.auteur || "—"} • {v.heureAction || ""}</div>
+                  <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 3 }}>✍️ {v.auteur || "—"} • {v.heureAction || ""}
+                    {v.modifiePar && <span style={{ color: "#E67E22" }}> • ✏️ modifié par {v.modifiePar} à {v.heureModif}</span>}
+                  </div>
                   <span style={S.tag("#1A5276")}>{v.canal}</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ fontWeight: 800, color: "#1E8449" }}>{fmt(v.total)}</span>
+                  <button onClick={() => { setVente({ date: v.date, client: v.client, canal: v.canal, nbPoulets: v.nbPoulets, prixUnit: v.prixUnit }); setEditVenteId(v.id); setShowVente(true); }}
+                    style={{ background: "#EBF5FB", border: "none", borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 16 }}>✏️</button>
                   <button onClick={() => {
                     if (window.confirm("Supprimer cette vente ?")) {
                       import("firebase/firestore").then(({ deleteDoc, doc: fDoc }) => {
@@ -451,7 +483,7 @@ function Finances({ depenses, ventes, userInfo }) {
       </>}
 
       {showDep && (
-        <Modal title="Nouvelle dépense" onClose={() => setShowDep(false)}>
+        <Modal title={editDepId ? "✏️ Modifier la dépense" : "Nouvelle dépense"} onClose={() => { setShowDep(false); setEditDepId(null); setDep({ date: "", categorie: "", description: "", montant: "" }); }}>
           <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 2 }}>Catégorie</label>
           <select value={dep.categorie} onChange={e => setDep(d => ({ ...d, categorie: e.target.value }))} style={S.input}>
             <option value="">-- Choisir --</option>
@@ -460,19 +492,19 @@ function Finances({ depenses, ventes, userInfo }) {
           {[["Date", "date", "date"], ["Description", "description", "text"], ["Montant (FCFA)", "montant", "number"]].map(([l, k, t]) => (
             <Field key={k} label={l} k={k} type={t} val={dep[k]} set={v => setDep(p => ({ ...p, [k]: v }))} />
           ))}
-          <button onClick={saveDep} style={S.btn("#C0392B")}>✅ Enregistrer</button>
+          <button onClick={saveDep} style={S.btn("#C0392B")}>{editDepId ? "✅ Modifier" : "✅ Enregistrer"}</button>
         </Modal>
       )}
 
       {showVente && (
-        <Modal title="Nouvelle vente" onClose={() => setShowVente(false)}>
+        <Modal title={editVenteId ? "✏️ Modifier la vente" : "Nouvelle vente"} onClose={() => { setShowVente(false); setEditVenteId(null); setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" }); }}>
           {[["Date", "date", "date"], ["Client / Acheteur", "client", "text"], ["Canal de vente", "canal", "text"], ["Nombre de poulets", "nbPoulets", "number"], ["Prix unitaire (FCFA)", "prixUnit", "number"]].map(([l, k, t]) => (
             <Field key={k} label={l} k={k} type={t} val={vente[k]} set={v => setVente(p => ({ ...p, [k]: v }))} />
           ))}
           {vente.nbPoulets && vente.prixUnit && (
             <div style={S.alert("#1E8449")}><span style={{ fontWeight: 800, color: "#1E8449" }}>Total : {fmt(Number(vente.nbPoulets) * Number(vente.prixUnit))}</span></div>
           )}
-          <button onClick={saveVente} style={S.btn("#1E8449")}>✅ Enregistrer</button>
+          <button onClick={saveVente} style={S.btn("#1E8449")}>{editVenteId ? "✅ Modifier" : "✅ Enregistrer"}</button>
         </Modal>
       )}
     </div>
