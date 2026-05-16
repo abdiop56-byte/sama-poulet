@@ -884,6 +884,435 @@ function GestionBandes({ bandes, bandeActive, setBandeActive, userInfo }) {
   );
 }
 
+// ── GRAPHIQUES & ANALYTICS ────────────────────────────────────────
+function Analytics({ suivi, depenses, ventes, bandeCfg }) {
+  const poussins = bandeCfg?.poussinsDepart || 450;
+
+  // Données mortalité par semaine
+  const mortaliteParSemaine = Array(6).fill(0).map((_, i) => {
+    const dateDebut = new Date(bandeCfg?.dateDebut || "2026-05-15");
+    const debut = new Date(dateDebut.getTime() + i * 7 * 86400000);
+    const fin = new Date(dateDebut.getTime() + (i + 1) * 7 * 86400000);
+    const morts = suivi.filter(j => { const d = new Date(j.date); return d >= debut && d < fin; }).reduce((s, j) => s + Number(j.morts || 0), 0);
+    return { sem: `S${i + 1}`, morts };
+  });
+
+  // CA par semaine
+  const caParSemaine = Array(6).fill(0).map((_, i) => {
+    const dateDebut = new Date(bandeCfg?.dateDebut || "2026-05-15");
+    const debut = new Date(dateDebut.getTime() + i * 7 * 86400000);
+    const fin = new Date(dateDebut.getTime() + (i + 1) * 7 * 86400000);
+    const ca = ventes.filter(v => { const d = new Date(v.date); return d >= debut && d < fin; }).reduce((s, v) => s + Number(v.total || 0), 0);
+    return { sem: `S${i + 1}`, ca };
+  });
+
+  // Dépenses par catégorie
+  const depParCat = {};
+  depenses.forEach(d => { depParCat[d.categorie] = (depParCat[d.categorie] || 0) + Number(d.montant || 0); });
+  const cats = Object.entries(depParCat).sort((a, b) => b[1] - a[1]);
+  const totalDep = cats.reduce((s, [, v]) => s + v, 0);
+
+  const maxMorts = Math.max(...mortaliteParSemaine.map(s => s.morts), 1);
+  const maxCA = Math.max(...caParSemaine.map(s => s.ca), 1);
+  const catColors = ["#1A5276", "#1E8449", "#784212", "#C0392B", "#E67E22", "#6C3483", "#2C3E50", "#AAB7B8"];
+
+  const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
+  const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
+  const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const prixMoyen = nbVendus > 0 ? totalV / nbVendus : 0;
+
+  return (
+    <div style={S.section}>
+      <p style={S.sectionTitle}>📈 Analytics</p>
+
+      {/* KPIs résumé */}
+      <div style={S.kpiRow}>
+        <div style={S.kpi("#1A5276")}>
+          <div style={S.kpiVal}>{((totalMorts / poussins) * 100).toFixed(1)}%</div>
+          <div style={S.kpiLbl}>Taux mortalité</div>
+        </div>
+        <div style={S.kpi("#1E8449")}>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{fmt(prixMoyen)}</div>
+          <div style={S.kpiLbl}>Prix moy/poulet</div>
+        </div>
+      </div>
+      <div style={S.kpiRow}>
+        <div style={S.kpi("#784212")}>
+          <div style={S.kpiVal}>{fmtN(nbVendus)}</div>
+          <div style={S.kpiLbl}>Poulets vendus</div>
+        </div>
+        <div style={S.kpi("#0F2940")}>
+          <div style={S.kpiVal}>{fmtN(poussins - totalMorts - nbVendus)}</div>
+          <div style={S.kpiLbl}>Restants</div>
+        </div>
+      </div>
+
+      {/* Graphique mortalité */}
+      <div style={S.card}>
+        <p style={S.cardTitle}>💀 Mortalité par semaine</p>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 100, marginBottom: 8 }}>
+          {mortaliteParSemaine.map((s, i) => (
+            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 10, color: "#888", fontWeight: 700 }}>{s.morts}</span>
+              <div style={{ width: "100%", background: s.morts > 10 ? "#C0392B" : s.morts > 5 ? "#E67E22" : "#1E8449", borderRadius: "4px 4px 0 0", height: Math.max((s.morts / maxMorts) * 80, s.morts > 0 ? 4 : 0) }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {mortaliteParSemaine.map((s, i) => (
+            <div key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "#888" }}>{s.sem}</div>
+          ))}
+        </div>
+      </div>
+
+      {/* Graphique CA */}
+      <div style={S.card}>
+        <p style={S.cardTitle}>💰 Chiffre d'affaires par semaine</p>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 100, marginBottom: 8 }}>
+          {caParSemaine.map((s, i) => (
+            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              {s.ca > 0 && <span style={{ fontSize: 9, color: "#1E8449", fontWeight: 700 }}>{(s.ca / 1000).toFixed(0)}k</span>}
+              <div style={{ width: "100%", background: s.ca > 0 ? "#1E8449" : "#E8ECF0", borderRadius: "4px 4px 0 0", height: Math.max((s.ca / maxCA) * 80, s.ca > 0 ? 4 : 2) }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {caParSemaine.map((s, i) => (
+            <div key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "#888" }}>{s.sem}</div>
+          ))}
+        </div>
+      </div>
+
+      {/* Répartition dépenses */}
+      {cats.length > 0 && (
+        <div style={S.card}>
+          <p style={S.cardTitle}>💸 Répartition des dépenses</p>
+          {/* Barre empilée */}
+          <div style={{ display: "flex", height: 20, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+            {cats.map(([cat, val], i) => (
+              <div key={cat} style={{ width: (val / totalDep * 100) + "%", background: catColors[i % catColors.length] }} title={cat} />
+            ))}
+          </div>
+          {cats.map(([cat, val], i) => (
+            <div key={cat} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #F0F4F8" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 5, background: catColors[i % catColors.length], flexShrink: 0 }} />
+                <span style={{ fontSize: 12 }}>{cat}</span>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{fmt(val)}</div>
+                <div style={{ fontSize: 10, color: "#888" }}>{(val / totalDep * 100).toFixed(0)}%</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Ventes par canal */}
+      {ventes.length > 0 && (() => {
+        const parCanal = {};
+        ventes.forEach(v => { parCanal[v.canal || "Autre"] = (parCanal[v.canal || "Autre"] || 0) + Number(v.total || 0); });
+        const totalCA = Object.values(parCanal).reduce((s, v) => s + v, 0);
+        return (
+          <div style={S.card}>
+            <p style={S.cardTitle}>🛒 Ventes par canal</p>
+            {Object.entries(parCanal).sort((a, b) => b[1] - a[1]).map(([canal, val], i) => (
+              <div key={canal} style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{canal}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1E8449" }}>{fmt(val)}</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: "#E8ECF0" }}>
+                  <div style={{ height: "100%", width: (val / totalCA * 100) + "%", background: catColors[i % catColors.length], borderRadius: 3 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ── CALCULATEUR RENTABILITÉ ───────────────────────────────────────
+function Calculateur({ depenses, suivi, bandeCfg }) {
+  const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
+  const effectif = (bandeCfg?.poussinsDepart || 450) - totalMorts;
+  const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
+
+  const [nbVente, setNbVente] = useState(String(effectif));
+  const [prix, setPrix] = useState("3500");
+  const [reserve, setReserve] = useState("10");
+
+  const nbN = Number(nbVente) || 0;
+  const prixN = Number(prix) || 0;
+  const reservePct = Number(reserve) || 0;
+
+  const ca = nbN * prixN;
+  const resultat = ca - totalDep;
+  const reserveMontant = Math.max(resultat, 0) * reservePct / 100;
+  const netDistribuable = Math.max(resultat - reserveMontant, 0);
+  const parPoulet = nbN > 0 ? (resultat / nbN) : 0;
+
+  const ASSOCIES_CALC = [
+    { nom: "Alune", parts: 59, couleur: "#1A5276" },
+    { nom: "Laye", parts: 25, couleur: "#1E8449" },
+    { nom: "Daff", parts: 16, couleur: "#784212" },
+  ];
+
+  return (
+    <div style={S.section}>
+      <p style={S.sectionTitle}>🧮 Calculateur de rentabilité</p>
+
+      <div style={{ ...S.card, background: "#F8F9FA" }}>
+        <p style={S.cardTitle}>Paramètres de simulation</p>
+        <Field label={`Nombre de poulets à vendre (disponibles : ${fmtN(effectif)})`} type="number" val={nbVente} set={setNbVente} />
+        <Field label="Prix de vente par poulet (FCFA)" type="number" val={prix} set={setPrix} />
+        <Field label="Réserve à garder (%)" type="number" val={reserve} set={setReserve} />
+        <div style={{ ...S.alert("#1A5276"), marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: "#888" }}>Investissement total : </span>
+          <span style={{ fontWeight: 700, color: "#1A5276" }}>{fmt(totalDep)}</span>
+        </div>
+      </div>
+
+      {/* Résultat simulation */}
+      <div style={{ ...S.card, background: resultat >= 0 ? "linear-gradient(135deg, #1E8449, #27AE60)" : "linear-gradient(135deg, #C0392B, #E74C3C)", color: "#fff" }}>
+        <p style={{ fontSize: 13, opacity: 0.85, margin: "0 0 8px" }}>Résultat simulé</p>
+        <div style={{ fontSize: 32, fontWeight: 900 }}>{fmt(Math.abs(resultat))}</div>
+        <div style={{ fontSize: 14, opacity: 0.85, marginTop: 4 }}>{resultat >= 0 ? "✅ Bénéfice" : "❌ Perte"}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
+          {[["CA simulé", fmt(ca)], ["Coûts totaux", fmt(totalDep)], ["Réserve", fmt(reserveMontant)], ["Net distribuable", fmt(netDistribuable)]].map(([l, v]) => (
+            <div key={l} style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ fontSize: 13, fontWeight: 800 }}>{v}</div>
+              <div style={{ fontSize: 10, opacity: 0.8 }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(255,255,255,0.15)", borderRadius: 8 }}>
+          <span style={{ fontSize: 12, opacity: 0.85 }}>Gain/perte par poulet : </span>
+          <span style={{ fontWeight: 800, fontSize: 14 }}>{fmt(Math.abs(parPoulet))} {parPoulet >= 0 ? "✅" : "❌"}</span>
+        </div>
+      </div>
+
+      {/* Dividendes simulés */}
+      {netDistribuable > 0 && (
+        <div style={S.card}>
+          <p style={S.cardTitle}>🤝 Dividendes simulés</p>
+          {ASSOCIES_CALC.map(a => (
+            <div key={a.nom} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F0F4F8" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 16, background: a.couleur, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 12 }}>{a.parts}%</div>
+                <span style={{ fontWeight: 600 }}>{a.nom}</span>
+              </div>
+              <span style={{ fontWeight: 800, color: "#1E8449", fontSize: 15 }}>{fmt(netDistribuable * a.parts / 100)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Seuil de rentabilité */}
+      <div style={S.card}>
+        <p style={S.cardTitle}>📊 Seuil de rentabilité</p>
+        {prixN > 0 ? (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 13 }}>Poulets min. à vendre pour rentrer dans les frais</span>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: "#1A5276" }}>{fmtN(Math.ceil(totalDep / prixN))} poulets</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>à {fmt(prixN)} FCFA/poulet</div>
+            <div style={{ marginTop: 10, height: 8, borderRadius: 4, background: "#E8ECF0" }}>
+              <div style={S.bar(Math.min((nbN / Math.ceil(totalDep / prixN)) * 100, 100), nbN >= Math.ceil(totalDep / prixN) ? "#1E8449" : "#E67E22")} />
+            </div>
+            <div style={{ fontSize: 11, color: nbN >= Math.ceil(totalDep / prixN) ? "#1E8449" : "#E67E22", marginTop: 4, fontWeight: 700 }}>
+              {nbN >= Math.ceil(totalDep / prixN) ? `✅ Vous dépassez le seuil de ${fmtN(nbN - Math.ceil(totalDep / prixN))} poulets` : `⚠️ Il manque ${fmtN(Math.ceil(totalDep / prixN) - nbN)} poulets pour rentrer dans les frais`}
+            </div>
+          </>
+        ) : <p style={{ color: "#888", fontSize: 13 }}>Entrez un prix de vente pour calculer</p>}
+      </div>
+    </div>
+  );
+}
+
+// ── CLIENTS ───────────────────────────────────────────────────────
+function Clients({ userInfo, bandeActive, ventes }) {
+  const [show, setShow] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [form, setForm] = useState({ nom: "", telephone: "", localisation: "", type: "", notes: "" });
+  const [editId, setEditId] = useState(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "samapoulet", "config", "clients"), snap => {
+      setClients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, []);
+
+  const save = async () => {
+    if (!form.nom) return;
+    if (editId) {
+      await updateDoc(doc(db, "samapoulet", "config", "clients", editId), { ...form, modifiePar: userInfo?.nom, heureModif: nowTime() });
+      setEditId(null);
+    } else {
+      await addDoc(collection(db, "samapoulet", "config", "clients"), { ...form, ...makeSig(userInfo) });
+    }
+    setForm({ nom: "", telephone: "", localisation: "", type: "", notes: "" });
+    setShow(false);
+  };
+
+  const del = async (id) => { if (window.confirm("Supprimer ce client ?")) await deleteDoc(doc(db, "samapoulet", "config", "clients", id)); };
+
+  // Calculer CA par client depuis les ventes
+  const caParClient = {};
+  ventes.forEach(v => { caParClient[v.client] = (caParClient[v.client] || 0) + Number(v.total || 0); });
+
+  const types = ["Particulier", "Restaurant", "Revendeur / Bana-bana", "Hôtel", "Entreprise", "Autre"];
+
+  return (
+    <div style={S.section}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <p style={S.sectionTitle}>👥 Clients</p>
+        <button onClick={() => { setEditId(null); setForm({ nom: "", telephone: "", localisation: "", type: "", notes: "" }); setShow(true); }} style={S.btnSm("#1A5276")}>+ Ajouter</button>
+      </div>
+
+      {/* Résumé */}
+      <div style={S.kpiRow}>
+        <div style={S.kpi("#1A5276")}><div style={S.kpiVal}>{clients.length}</div><div style={S.kpiLbl}>Clients enregistrés</div></div>
+        <div style={S.kpi("#1E8449")}><div style={{ fontSize: 15, fontWeight: 800 }}>{fmt(Object.values(caParClient).reduce((s, v) => s + v, 0))}</div><div style={S.kpiLbl}>CA total clients</div></div>
+      </div>
+
+      {clients.length === 0
+        ? <div style={{ ...S.card, textAlign: "center", padding: 32, color: "#AAB7B8" }}><div style={{ fontSize: 40 }}>👥</div><p>Aucun client enregistré</p></div>
+        : clients.map(c => (
+          <div key={c.id} style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nom}</div>
+                {c.type && <span style={S.tag("#1A5276")}>{c.type}</span>}
+                {c.telephone && <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>📞 {c.telephone}</div>}
+                {c.localisation && <div style={{ fontSize: 12, color: "#888" }}>📍 {c.localisation}</div>}
+                {caParClient[c.nom] > 0 && <div style={{ fontSize: 12, color: "#1E8449", fontWeight: 700, marginTop: 4 }}>💰 CA : {fmt(caParClient[c.nom])}</div>}
+                {c.notes && <div style={{ fontSize: 11, color: "#888", fontStyle: "italic", marginTop: 4 }}>"{c.notes}"</div>}
+                <SigLine auteur={c.auteur} heureAction={c.heureAction} modifiePar={c.modifiePar} heureModif={c.heureModif} />
+              </div>
+              <div style={{ display: "flex", gap: 5 }}>
+                <button onClick={() => { setForm({ nom: c.nom, telephone: c.telephone || "", localisation: c.localisation || "", type: c.type || "", notes: c.notes || "" }); setEditId(c.id); setShow(true); }} style={S.btnIcon()}>✏️</button>
+                <button onClick={() => del(c.id)} style={S.btnIcon("#FFF0F0")}>🗑️</button>
+              </div>
+            </div>
+          </div>
+        ))
+      }
+
+      {show && (
+        <Modal title={editId ? "✏️ Modifier le client" : "Nouveau client"} onClose={() => { setShow(false); setEditId(null); }}>
+          <Field label="Nom / Raison sociale" type="text" val={form.nom} set={v => setForm(p => ({ ...p, nom: v }))} />
+          <Field label="Type de client" val={form.type} set={v => setForm(p => ({ ...p, type: v }))} options={types} />
+          <Field label="Téléphone" type="tel" val={form.telephone} set={v => setForm(p => ({ ...p, telephone: v }))} />
+          <Field label="Localisation" type="text" val={form.localisation} set={v => setForm(p => ({ ...p, localisation: v }))} />
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 2 }}>Notes</label>
+          <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} style={{ ...S.input, height: 60, resize: "none" }} placeholder="Préférences, remarques..." />
+          <button onClick={save} style={S.btn("#1A5276")}>{editId ? "✅ Modifier" : "✅ Enregistrer"}</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── FOURNISSEURS ──────────────────────────────────────────────────
+function Fournisseurs({ userInfo }) {
+  const [show, setShow] = useState(false);
+  const [fournisseurs, setFournisseurs] = useState([]);
+  const [form, setForm] = useState({ nom: "", categorie: "", telephone: "", localisation: "", prixNegocies: "", notes: "" });
+  const [editId, setEditId] = useState(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "samapoulet", "config", "fournisseurs"), snap => {
+      setFournisseurs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, []);
+
+  const save = async () => {
+    if (!form.nom) return;
+    if (editId) {
+      await updateDoc(doc(db, "samapoulet", "config", "fournisseurs", editId), { ...form, modifiePar: userInfo?.nom, heureModif: nowTime() });
+      setEditId(null);
+    } else {
+      await addDoc(collection(db, "samapoulet", "config", "fournisseurs"), { ...form, ...makeSig(userInfo) });
+    }
+    setForm({ nom: "", categorie: "", telephone: "", localisation: "", prixNegocies: "", notes: "" });
+    setShow(false);
+  };
+
+  const del = async (id) => { if (window.confirm("Supprimer ce fournisseur ?")) await deleteDoc(doc(db, "samapoulet", "config", "fournisseurs", id)); };
+  const cats = ["Poussins", "Aliments", "Vaccins & Médicaments", "Équipements", "Transport", "Autre"];
+  const catColors = { "Poussins": "#E67E22", "Aliments": "#1E8449", "Vaccins & Médicaments": "#C0392B", "Équipements": "#1A5276", "Transport": "#784212", "Autre": "#AAB7B8" };
+
+  return (
+    <div style={S.section}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <p style={S.sectionTitle}>🏪 Fournisseurs</p>
+        <button onClick={() => { setEditId(null); setForm({ nom: "", categorie: "", telephone: "", localisation: "", prixNegocies: "", notes: "" }); setShow(true); }} style={S.btnSm("#1A5276")}>+ Ajouter</button>
+      </div>
+
+      <div style={S.kpi("#1A5276")}><div style={S.kpiVal}>{fournisseurs.length}</div><div style={S.kpiLbl}>Fournisseurs enregistrés</div></div>
+      <div style={{ height: 12 }} />
+
+      {/* Grouper par catégorie */}
+      {cats.map(cat => {
+        const items = fournisseurs.filter(f => f.categorie === cat);
+        if (items.length === 0) return null;
+        return (
+          <div key={cat}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 6px" }}>
+              <div style={{ width: 10, height: 10, borderRadius: 5, background: catColors[cat] || "#AAB7B8" }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: 0.5 }}>{cat}</span>
+            </div>
+            {items.map(f => (
+              <div key={f.id} style={S.card}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{f.nom}</div>
+                    {f.telephone && <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>📞 {f.telephone}</div>}
+                    {f.localisation && <div style={{ fontSize: 12, color: "#888" }}>📍 {f.localisation}</div>}
+                    {f.prixNegocies && <div style={{ fontSize: 12, color: "#1E8449", fontWeight: 700, marginTop: 4 }}>💰 Prix négociés : {f.prixNegocies}</div>}
+                    {f.notes && <div style={{ fontSize: 11, color: "#888", fontStyle: "italic", marginTop: 4 }}>"{f.notes}"</div>}
+                    <SigLine auteur={f.auteur} heureAction={f.heureAction} modifiePar={f.modifiePar} heureModif={f.heureModif} />
+                  </div>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    <button onClick={() => { setForm({ nom: f.nom, categorie: f.categorie || "", telephone: f.telephone || "", localisation: f.localisation || "", prixNegocies: f.prixNegocies || "", notes: f.notes || "" }); setEditId(f.id); setShow(true); }} style={S.btnIcon()}>✏️</button>
+                    <button onClick={() => del(f.id)} style={S.btnIcon("#FFF0F0")}>🗑️</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {fournisseurs.length === 0 && (
+        <div style={{ ...S.card, textAlign: "center", padding: 32, color: "#AAB7B8" }}>
+          <div style={{ fontSize: 40 }}>🏪</div>
+          <p>Aucun fournisseur enregistré</p>
+        </div>
+      )}
+
+      {show && (
+        <Modal title={editId ? "✏️ Modifier le fournisseur" : "Nouveau fournisseur"} onClose={() => { setShow(false); setEditId(null); }}>
+          <Field label="Nom du fournisseur" type="text" val={form.nom} set={v => setForm(p => ({ ...p, nom: v }))} />
+          <Field label="Catégorie" val={form.categorie} set={v => setForm(p => ({ ...p, categorie: v }))} options={cats} />
+          <Field label="Téléphone" type="tel" val={form.telephone} set={v => setForm(p => ({ ...p, telephone: v }))} />
+          <Field label="Localisation" type="text" val={form.localisation} set={v => setForm(p => ({ ...p, localisation: v }))} />
+          <Field label="Prix négociés" type="text" val={form.prixNegocies} set={v => setForm(p => ({ ...p, prixNegocies: v }))} />
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 2 }}>Notes</label>
+          <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} style={{ ...S.input, height: 60, resize: "none" }} placeholder="Qualité, délais, conditions..." />
+          <button onClick={save} style={S.btn("#1A5276")}>{editId ? "✅ Modifier" : "✅ Enregistrer"}</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ── APP PRINCIPALE ────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
@@ -908,7 +1337,6 @@ export default function App() {
     });
   }, []);
 
-  // Init bande2 si nécessaire
   useEffect(() => {
     if (!user) return;
     const init = async () => {
@@ -925,10 +1353,7 @@ export default function App() {
     if (!user) return;
     const unsubs = [];
 
-    unsubs.push(onSnapshot(doc(db, "samapoulet", bandeActive), snap => {
-      if (snap.exists()) setBandeCfg(snap.data());
-    }));
-
+    unsubs.push(onSnapshot(doc(db, "samapoulet", bandeActive), snap => { if (snap.exists()) setBandeCfg(snap.data()); }));
     unsubs.push(onSnapshot(collection(db, "samapoulet"), snap => {
       setBandes(snap.docs.filter(d => d.id.startsWith("bande") && d.id !== "config").map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.numero || 0) - (b.numero || 0)));
     }));
@@ -964,39 +1389,49 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "#0F2940", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
       <div style={{ fontSize: 60 }}>🐓</div>
       <p style={{ color: "#C9A84C", fontSize: 22, fontWeight: 800, marginTop: 16 }}>Sama Poulet</p>
-      <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>v2.0 — Chargement...</p>
+      <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>v2.1 — Chargement...</p>
     </div>
   );
 
   if (!user) return <Login />;
 
-  const perms = PERMS[userInfo?.role] || {};
-
   const tabs = [
     { id: "dashboard", icon: "📊", label: "Accueil" },
-    perms.suivi && { id: "suivi", icon: "🐔", label: "Suivi" },
-    perms.finances && { id: "finances", icon: "💰", label: "Finances" },
-    perms.sante && { id: "sante", icon: "💉", label: "Santé" },
-    perms.strategie && { id: "strategie", icon: "🚀", label: "Stratégie" },
-    perms.associes && { id: "associes", icon: "🤝", label: "Associés" },
-    perms.bandes && { id: "bandes", icon: "🐣", label: "Bandes" },
-  ].filter(Boolean);
+    { id: "suivi", icon: "🐔", label: "Suivi" },
+    { id: "finances", icon: "💰", label: "Finances" },
+    { id: "analytics", icon: "📈", label: "Stats" },
+    { id: "calcul", icon: "🧮", label: "Calcul" },
+    { id: "clients", icon: "👥", label: "Clients" },
+    { id: "fournisseurs", icon: "🏪", label: "Fourniss." },
+    { id: "sante", icon: "💉", label: "Santé" },
+    { id: "strategie", icon: "🚀", label: "Stratégie" },
+    { id: "associes", icon: "🤝", label: "Associés" },
+    { id: "bandes", icon: "🐣", label: "Bandes" },
+  ];
+
+  // Nav visible max 6 tabs + scroll
+  const mainTabs = tabs.slice(0, 6);
+  const moreTabs = tabs.slice(6);
 
   return (
     <div style={S.app}>
       {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} />}
       {tab === "suivi" && <SuiviQuotidien suivi={suivi} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} />}
       {tab === "finances" && <Finances depenses={depenses} ventes={ventes} userInfo={userInfo} bandeActive={bandeActive} bandeCfg={bandeCfg} setBandeCfg={setBandeCfg} />}
+      {tab === "analytics" && <Analytics suivi={suivi} depenses={depenses} ventes={ventes} bandeCfg={bandeCfg} />}
+      {tab === "calcul" && <Calculateur depenses={depenses} suivi={suivi} bandeCfg={bandeCfg} />}
+      {tab === "clients" && <Clients userInfo={userInfo} bandeActive={bandeActive} ventes={ventes} />}
+      {tab === "fournisseurs" && <Fournisseurs userInfo={userInfo} />}
       {tab === "sante" && <Sante vaccins={vaccins} incidents={incidents} userInfo={userInfo} bandeActive={bandeActive} />}
       {tab === "strategie" && <Strategie phases={phases} setPhases={setPhases} userInfo={userInfo} />}
       {tab === "associes" && <Associes depenses={depenses} ventes={ventes} userInfo={userInfo} onLogout={() => signOut(auth)} />}
       {tab === "bandes" && <GestionBandes bandes={bandes} bandeActive={bandeActive} setBandeActive={setBandeActive} userInfo={userInfo} />}
 
-      <div style={S.nav}>
+      <div style={{ ...S.nav, overflowX: "auto", justifyContent: "flex-start", gap: 0, padding: "8px 8px 12px" }}>
         {tabs.map(t => (
-          <div key={t.id} style={S.navItem(tab === t.id)} onClick={() => setTab(t.id)}>
-            <span style={{ fontSize: 22 }}>{t.icon}</span>
-            <span style={{ fontSize: 9, fontWeight: tab === t.id ? 700 : 500, color: tab === t.id ? "#1A5276" : "#888" }}>{t.label}</span>
+          <div key={t.id} style={{ ...S.navItem(tab === t.id), minWidth: 52, padding: "0 4px" }} onClick={() => setTab(t.id)}>
+            <span style={{ fontSize: 20 }}>{t.icon}</span>
+            <span style={{ fontSize: 8, fontWeight: tab === t.id ? 700 : 500, color: tab === t.id ? "#1A5276" : "#888", whiteSpace: "nowrap" }}>{t.label}</span>
           </div>
         ))}
       </div>
