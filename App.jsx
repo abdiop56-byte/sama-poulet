@@ -17,7 +17,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const USERS = {
-  "fondateur@samapoulet.com": { nom: "Fondateur", parts: 59, couleur: "#1A5276" },
+  "fondateur@samapoulet.com": { nom: "Alune", parts: 59, couleur: "#1A5276" },
   "laye@samapoulet.com": { nom: "Laye", parts: 25, couleur: "#1E8449" },
   "daff@samapoulet.com": { nom: "Daff", parts: 16, couleur: "#784212" },
 };
@@ -33,7 +33,7 @@ const VACCINS_INIT = [
 ];
 
 const ASSOCIES = [
-  { id: 1, nom: "Fondateur", role: "Fondateur & Investisseur", parts: 59, couleur: "#1A5276" },
+  { id: 1, nom: "Alune", role: "Fondateur & Investisseur", parts: 59, couleur: "#1A5276" },
   { id: 2, nom: "Laye", role: "Responsable Production", parts: 25, couleur: "#1E8449" },
   { id: 3, nom: "Daff", role: "Responsable Finances", parts: 16, couleur: "#784212" },
 ];
@@ -252,7 +252,7 @@ function Dashboard({ suivi, depenses, ventes, vaccins, userInfo }) {
 }
 
 // ── SUIVI QUOTIDIEN ───────────────────────────────────────────────
-function SuiviQuotidien({ suivi }) {
+function SuiviQuotidien({ suivi, userInfo }) {
   const [show, setShow] = useState(false);
   const [f, setF] = useState({ date: new Date().toISOString().split("T")[0], morts: "", alimentKg: "", poidsMoyen: "", temperature: "", observations: "" });
   const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
@@ -261,7 +261,10 @@ function SuiviQuotidien({ suivi }) {
   const save = async () => {
     if (!f.date) return;
     await addDoc(collection(db, "samapoulet", "bande2", "suiviQuotidien"), {
-      ...f, morts: Number(f.morts || 0), effectifFin: effectif - Number(f.morts || 0), createdAt: new Date().toISOString()
+      ...f, morts: Number(f.morts || 0), effectifFin: effectif - Number(f.morts || 0),
+      createdAt: new Date().toISOString(),
+      auteur: userInfo?.nom || "Inconnu",
+      heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
     });
     setF({ date: new Date().toISOString().split("T")[0], morts: "", alimentKg: "", poidsMoyen: "", temperature: "", observations: "" });
     setShow(false);
@@ -294,6 +297,7 @@ function SuiviQuotidien({ suivi }) {
               ))}
             </div>
             {j.observations && <p style={{ fontSize: 12, color: "#666", marginTop: 8, fontStyle: "italic", marginBottom: 0 }}>"{j.observations}"</p>}
+            <p style={{ fontSize: 10, color: "#AAB7B8", marginTop: 6, marginBottom: 0, textAlign: "right" }}>✍️ {j.auteur || "—"} • {j.heureAction || ""}</p>
           </div>
         ))
       }
@@ -312,7 +316,7 @@ function SuiviQuotidien({ suivi }) {
 }
 
 // ── FINANCES ──────────────────────────────────────────────────────
-function Finances({ depenses, ventes }) {
+function Finances({ depenses, ventes, userInfo }) {
   const [tab, setTab] = useState("depenses");
   const [showDep, setShowDep] = useState(false);
   const [showVente, setShowVente] = useState(false);
@@ -326,14 +330,23 @@ function Finances({ depenses, ventes }) {
 
   const saveDep = async () => {
     if (!dep.montant) return;
-    await addDoc(collection(db, "samapoulet", "bande2", "depenses"), { ...dep, montant: Number(dep.montant), createdAt: new Date().toISOString() });
+    await addDoc(collection(db, "samapoulet", "bande2", "depenses"), {
+      ...dep, montant: Number(dep.montant), createdAt: new Date().toISOString(),
+      auteur: userInfo?.nom || "Inconnu",
+      heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    });
     setDep({ date: "", categorie: "", description: "", montant: "" });
     setShowDep(false);
   };
 
   const saveVente = async () => {
     if (!vente.nbPoulets || !vente.prixUnit) return;
-    await addDoc(collection(db, "samapoulet", "bande2", "ventes"), { ...vente, nbPoulets: Number(vente.nbPoulets), prixUnit: Number(vente.prixUnit), total: Number(vente.nbPoulets) * Number(vente.prixUnit), createdAt: new Date().toISOString() });
+    await addDoc(collection(db, "samapoulet", "bande2", "ventes"), {
+      ...vente, nbPoulets: Number(vente.nbPoulets), prixUnit: Number(vente.prixUnit),
+      total: Number(vente.nbPoulets) * Number(vente.prixUnit), createdAt: new Date().toISOString(),
+      auteur: userInfo?.nom || "Inconnu",
+      heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    });
     setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" });
     setShowVente(false);
   };
@@ -368,6 +381,7 @@ function Finances({ depenses, ventes }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{d.description || d.categorie}</div>
                   <div style={{ fontSize: 11, color: "#888" }}>{d.categorie} • {d.date}</div>
+                  <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 3 }}>✍️ {d.auteur || "—"} • {d.heureAction || ""}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ fontWeight: 800, color: "#C0392B" }}>{fmt(d.montant)}</span>
@@ -395,6 +409,7 @@ function Finances({ depenses, ventes }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{v.client}</div>
                   <div style={{ fontSize: 11, color: "#888" }}>{v.nbPoulets} poulets × {fmt(v.prixUnit)} • {v.date}</div>
+                  <div style={{ fontSize: 10, color: "#AAB7B8", marginTop: 3 }}>✍️ {v.auteur || "—"} • {v.heureAction || ""}</div>
                   <span style={S.tag("#1A5276")}>{v.canal}</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -465,16 +480,25 @@ function Finances({ depenses, ventes }) {
 }
 
 // ── SANTÉ ─────────────────────────────────────────────────────────
-function Sante({ vaccins, incidents }) {
+function Sante({ vaccins, incidents, userInfo }) {
   const [showInc, setShowInc] = useState(false);
   const [inc, setInc] = useState({ date: "", symptomes: "", nbAnimaux: "", traitement: "" });
 
   const toggleVacc = async (v) => {
-    await setDoc(doc(db, "samapoulet", "bande2", "vaccinations", v.id), { ...v, fait: !v.fait, dateReelle: !v.fait ? new Date().toLocaleDateString("fr-FR") : "" });
+    await setDoc(doc(db, "samapoulet", "bande2", "vaccinations", v.id), {
+      ...v, fait: !v.fait,
+      dateReelle: !v.fait ? new Date().toLocaleDateString("fr-FR") : "",
+      auteur: userInfo?.nom || "Inconnu",
+      heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    });
   };
 
   const saveInc = async () => {
-    await addDoc(collection(db, "samapoulet", "bande2", "incidents"), { ...inc, createdAt: new Date().toISOString() });
+    await addDoc(collection(db, "samapoulet", "bande2", "incidents"), {
+      ...inc, createdAt: new Date().toISOString(),
+      auteur: userInfo?.nom || "Inconnu",
+      heureAction: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    });
     setInc({ date: "", symptomes: "", nbAnimaux: "", traitement: "" });
     setShowInc(false);
   };
@@ -490,6 +514,7 @@ function Sante({ vaccins, incidents }) {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: v.fait ? "#888" : "#0F2940", textDecoration: v.fait ? "line-through" : "none" }}>{v.vaccin}</div>
               <div style={{ fontSize: 11, color: "#AAB7B8" }}>Sem. {v.semaine} • {v.fait ? `Fait le ${v.dateReelle}` : `Prévu : ${v.datePrevue}`}</div>
+              {v.fait && v.auteur && <div style={{ fontSize: 10, color: "#AAB7B8" }}>✍️ {v.auteur} • {v.heureAction}</div>}
             </div>
             <span style={S.tag(v.fait ? "#1E8449" : "#E67E22")}>{v.fait ? "Fait ✓" : "À faire"}</span>
           </div>
@@ -508,6 +533,7 @@ function Sante({ vaccins, incidents }) {
             <div style={{ fontWeight: 700, color: "#C0392B" }}>{i.date} — {i.nbAnimaux} animal(aux)</div>
             <p style={{ fontSize: 13, marginTop: 4 }}>{i.symptomes}</p>
             {i.traitement && <p style={{ fontSize: 12, color: "#1E8449", margin: 0 }}>🩺 {i.traitement}</p>}
+            <p style={{ fontSize: 10, color: "#AAB7B8", marginTop: 6, marginBottom: 0, textAlign: "right" }}>✍️ {i.auteur || "—"} • {i.heureAction || ""}</p>
           </div>
         ))
       }
@@ -727,9 +753,9 @@ export default function App() {
   return (
     <div style={S.app}>
       {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} userInfo={userInfo} />}
-      {tab === "suivi" && <SuiviQuotidien suivi={suivi} />}
-      {tab === "finances" && <Finances depenses={depenses} ventes={ventes} />}
-      {tab === "sante" && <Sante vaccins={vaccins} incidents={incidents} />}
+      {tab === "suivi" && <SuiviQuotidien suivi={suivi} userInfo={userInfo} />}
+      {tab === "finances" && <Finances depenses={depenses} ventes={ventes} userInfo={userInfo} />}
+      {tab === "sante" && <Sante vaccins={vaccins} incidents={incidents} userInfo={userInfo} />}
       {tab === "strategie" && <Strategie phases={phases} setPhases={setPhases} />}
       {tab === "associes" && <Associes depenses={depenses} ventes={ventes} onLogout={() => signOut(auth)} />}
       <div style={S.bottomNav}>
