@@ -409,18 +409,36 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
   const [showDep, setShowDep] = useState(false);
   const [showVente, setShowVente] = useState(false);
   const [showStock, setShowStock] = useState(false);
+  const [showBande1, setShowBande1] = useState(false);
+  const [showCredit, setShowCredit] = useState(false);
   const [dep, setDep] = useState({ date: "", categorie: "", description: "", montant: "" });
-  const [vente, setVente] = useState({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" });
+  const [vente, setVente] = useState({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "comptant", acompte: "", dateEcheance: "" });
   const [stockAjout, setStockAjout] = useState({ qte: "", type: "Aliment Démarrage" });
+  const [bande1Form, setBande1Form] = useState({ argentRestant: "", nbPoussinsRestants: "", notes: "" });
   const [editDepId, setEditDepId] = useState(null);
   const [editVenteId, setEditVenteId] = useState(null);
+  const [credits, setCredits] = useState([]);
+  const [bande1Data, setBande1Data] = useState(null);
 
   if (!PERMS[userInfo?.role]?.finances) return <AccessDenied />;
   const canWrite = WRITE_PERMS[userInfo?.role]?.finances;
 
+  // Charger données bande 1 et crédits
+  useEffect(() => {
+    const unsub1 = onSnapshot(doc(db, "samapoulet", "config", "global", "bande1Solde"), snap => {
+      if (snap.exists()) setBande1Data(snap.data());
+    });
+    const q = query(collection(db, "samapoulet", bandeActive, "credits"), orderBy("createdAt", "desc"));
+    const unsub2 = onSnapshot(q, snap => setCredits(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => { unsub1(); unsub2(); };
+  }, [bandeActive]);
+
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
-  const resultat = totalV - totalDep;
+  const totalCreditRecu = credits.reduce((s, c) => s + Number(c.montantRecu || 0), 0);
+  const totalCreditDu = credits.filter(c => c.statut !== "payé").reduce((s, c) => s + (Number(c.total || 0) - Number(c.montantRecu || 0)), 0);
+  const argentBande1 = Number(bande1Data?.argentRestant || 0);
+  const resultat = totalV + totalCreditRecu + argentBande1 - totalDep;
   const benefice = Math.max(resultat, 0);
   const stock = bandeCfg?.stockAliments || 0;
   const cats = ["Poussins", "Aliment Démarrage", "Aliment Croissance", "Aliment Finition", "Vaccins", "Médicaments", "Litière", "Transport", "Autres"];
@@ -440,14 +458,33 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
   const saveVente = async () => {
     if (!vente.nbPoulets || !vente.prixUnit) return;
     const total = Number(vente.nbPoulets) * Number(vente.prixUnit);
+    const acompte = Number(vente.acompte || 0);
     const data = { ...vente, nbPoulets: Number(vente.nbPoulets), prixUnit: Number(vente.prixUnit), total };
-    if (editVenteId) {
-      await updateDoc(doc(db, "samapoulet", bandeActive, "ventes", editVenteId), { ...data, modifiePar: userInfo?.nom, heureModif: nowTime() });
-      setEditVenteId(null);
+
+    if (vente.typeVente === "credit") {
+      // Vente à crédit → enregistrer dans credits
+      const creditData = {
+        ...data, montantRecu: acompte, resteDu: total - acompte,
+        statut: acompte >= total ? "payé" : acompte > 0 ? "partiel" : "impayé",
+        ...makeSig(userInfo)
+      };
+      if (editVenteId) {
+        await updateDoc(doc(db, "samapoulet", bandeActive, "credits", editVenteId), { ...creditData, modifiePar: userInfo?.nom, heureModif: nowTime() });
+        setEditVenteId(null);
+      } else {
+        await addDoc(collection(db, "samapoulet", bandeActive, "credits"), creditData);
+      }
     } else {
-      await addDoc(collection(db, "samapoulet", bandeActive, "ventes"), { ...data, ...makeSig(userInfo) });
+      // Vente comptant normale
+      if (editVenteId) {
+        await updateDoc(doc(db, "samapoulet", bandeActive, "ventes", editVenteId), { ...data, modifiePar: userInfo?.nom, heureModif: nowTime() });
+        setEditVenteId(null);
+      } else {
+        await addDoc(collection(db, "samapoulet", bandeActive, "ventes"), { ...data, ...makeSig(userInfo) });
+      }
     }
-    setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" }); setShowVente(false);
+    setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "comptant", acompte: "", dateEcheance: "" });
+    setShowVente(false);
   };
 
   const updateStock = async () => {
@@ -457,22 +494,73 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
     setStockAjout({ qte: "", type: "Aliment Démarrage" }); setShowStock(false);
   };
 
+  const saveBande1 = async () => {
+    await setDoc(doc(db, "samapoulet", "config", "global", "bande1Solde"), {
+      ...bande1Form, argentRestant: Number(bande1Form.argentRestant || 0),
+      nbPoussinsRestants: Number(bande1Form.nbPoussinsRestants || 0),
+      modifiePar: userInfo?.nom, heureModif: nowTime(), updatedAt: new Date().toISOString()
+    });
+    setShowBande1(false);
+  };
+
+  const marquerPayé = async (credit, montantSupp) => {
+    const newMontantRecu = Number(credit.montantRecu || 0) + Number(montantSupp || 0);
+    const newResteDu = Number(credit.total || 0) - newMontantRecu;
+    const newStatut = newResteDu <= 0 ? "payé" : "partiel";
+    await updateDoc(doc(db, "samapoulet", bandeActive, "credits", credit.id), {
+      montantRecu: newMontantRecu, resteDu: Math.max(newResteDu, 0), statut: newStatut,
+      modifiePar: userInfo?.nom, heureModif: nowTime()
+    });
+    // Si payé totalement → transférer dans ventes normales
+    if (newStatut === "payé") {
+      await addDoc(collection(db, "samapoulet", bandeActive, "ventes"), {
+        ...credit, total: credit.total, ...makeSig(userInfo), notes: "Crédit soldé"
+      });
+    }
+  };
+
   const delDep = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "depenses", id)); };
   const delVente = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "ventes", id)); };
+  const delCredit = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "credits", id)); };
+
+  const creditStatutColor = { "payé": "#1E8449", "partiel": "#E67E22", "impayé": "#C0392B" };
+  const creditStatutLabel = { "payé": "✅ Payé", "partiel": "⏳ Partiel", "impayé": "🔴 Impayé" };
 
   return (
     <div style={S.section}>
       <p style={S.sectionTitle}>💰 Finances</p>
 
+      {/* Résumé financier global */}
       <div style={{ ...S.card, background: "linear-gradient(135deg, #0F2940, #1A4A7A)", color: "#fff" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", textAlign: "center", gap: 8 }}>
-          {[["Dépenses", fmt(totalDep), "#FF6B6B"], ["Recettes", fmt(totalV), "#51CF66"], ["Résultat", fmt(Math.abs(resultat)), resultat >= 0 ? "#51CF66" : "#FF6B6B"]].map(([l, v, c]) => (
+          {[["Dépenses", fmt(totalDep), "#FF6B6B"], ["Recettes", fmt(totalV + totalCreditRecu + argentBande1), "#51CF66"], ["Résultat", fmt(Math.abs(resultat)), resultat >= 0 ? "#51CF66" : "#FF6B6B"]].map(([l, v, c]) => (
             <div key={l}><div style={{ fontSize: 13, fontWeight: 800, color: c }}>{v}</div><div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{l}</div></div>
           ))}
         </div>
         <div style={{ textAlign: "center", marginTop: 10, fontSize: 13, fontWeight: 700, color: resultat >= 0 ? "#51CF66" : "#FF6B6B" }}>
           {resultat >= 0 ? "✅ Bénéfice" : "❌ Perte"} : {fmt(Math.abs(resultat))}
         </div>
+        {totalCreditDu > 0 && <div style={{ textAlign: "center", marginTop: 6, fontSize: 11, color: "#FCC419" }}>⚠️ Créances en attente : {fmt(totalCreditDu)}</div>}
+      </div>
+
+      {/* Bande 1 solde */}
+      <div style={{ ...S.card, border: "1.5px solid #C9A84C", background: "#FFFBEB" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <p style={{ ...S.cardTitle, marginBottom: 0, color: "#92400E" }}>🐣 Solde Bande 1</p>
+          {canWrite && <button onClick={() => { setBande1Form({ argentRestant: bande1Data?.argentRestant || "", nbPoussinsRestants: bande1Data?.nbPoussinsRestants || "", notes: bande1Data?.notes || "" }); setShowBande1(true); }} style={S.btnSm("#92400E")}>✏️ Modifier</button>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#1E8449" }}>{fmt(argentBande1)}</div>
+            <div style={{ fontSize: 11, color: "#888" }}>Argent restant</div>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#E67E22" }}>{fmtN(bande1Data?.nbPoussinsRestants || 0)}</div>
+            <div style={{ fontSize: 11, color: "#888" }}>Poulets restants</div>
+          </div>
+        </div>
+        {bande1Data?.notes && <p style={{ fontSize: 11, color: "#888", fontStyle: "italic", marginTop: 8, marginBottom: 0 }}>"{bande1Data.notes}"</p>}
+        {!bande1Data && canWrite && <p style={{ fontSize: 12, color: "#E67E22", margin: "8px 0 0" }}>👆 Cliquez "Modifier" pour renseigner le solde bande 1</p>}
       </div>
 
       {/* Stock Aliments */}
@@ -495,15 +583,16 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        {[["depenses", "Dépenses"], ["ventes", "Ventes"], ["dividendes", "Dividendes"]].map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: "8px 0", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 12, cursor: "pointer", background: tab === id ? "#0F2940" : "#E8ECF0", color: tab === id ? "#fff" : "#666" }}>{label}</button>
+      {/* Onglets */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
+        {[["depenses", "💸 Dépenses"], ["ventes", "🛒 Ventes"], ["credits", `💳 Crédits${totalCreditDu > 0 ? ` (${credits.filter(c => c.statut !== "payé").length})` : ""}`], ["dividendes", "🤝 Dividendes"]].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ flexShrink: 0, padding: "8px 12px", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 11, cursor: "pointer", background: tab === id ? "#0F2940" : "#E8ECF0", color: tab === id ? "#fff" : "#666" }}>{label}</button>
         ))}
       </div>
 
       {tab === "depenses" && <>
         {canWrite && <button onClick={() => { setEditDepId(null); setDep({ date: "", categorie: "", description: "", montant: "" }); setShowDep(true); }} style={S.btn("#C0392B")}>+ Ajouter une dépense</button>}
-        {!canWrite && <div style={S.alert("#AAB7B8")}><span style={{ color: "#888" }}>👁️ Lecture seule — vous pouvez consulter mais pas modifier</span></div>}
+        {!canWrite && <div style={S.alert("#AAB7B8")}><span style={{ color: "#888" }}>👁️ Lecture seule</span></div>}
         {depenses.length === 0
           ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>💸</div><p>Aucune dépense</p></div>
           : depenses.map(d => (
@@ -526,8 +615,8 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
       </>}
 
       {tab === "ventes" && <>
-        {canWrite && <button onClick={() => { setEditVenteId(null); setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" }); setShowVente(true); }} style={S.btn("#1E8449")}>+ Enregistrer une vente</button>}
-        {!canWrite && <div style={S.alert("#AAB7B8")}><span style={{ color: "#888" }}>👁️ Lecture seule — vous pouvez consulter mais pas modifier</span></div>}
+        {canWrite && <button onClick={() => { setEditVenteId(null); setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "comptant", acompte: "", dateEcheance: "" }); setShowVente(true); }} style={S.btn("#1E8449")}>+ Enregistrer une vente</button>}
+        {!canWrite && <div style={S.alert("#AAB7B8")}><span style={{ color: "#888" }}>👁️ Lecture seule</span></div>}
         {ventes.length === 0
           ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>🛒</div><p>Aucune vente</p></div>
           : ventes.map(v => (
@@ -537,11 +626,12 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{v.client}</div>
                   <div style={{ fontSize: 11, color: "#888" }}>{v.nbPoulets} poulets × {fmt(v.prixUnit)} • {v.date}</div>
                   <span style={S.tag("#1A5276")}>{v.canal}</span>
+                  {v.notes && <span style={{ ...S.tag("#888"), marginLeft: 4 }}>{v.notes}</span>}
                   <SigLine auteur={v.auteur} heureAction={v.heureAction} modifiePar={v.modifiePar} heureModif={v.heureModif} />
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <span style={{ fontWeight: 800, color: "#1E8449", fontSize: 13 }}>{fmt(v.total)}</span>
-                  {canWrite && <button onClick={() => { setVente({ date: v.date, client: v.client, canal: v.canal, nbPoulets: v.nbPoulets, prixUnit: v.prixUnit }); setEditVenteId(v.id); setShowVente(true); }} style={S.btnIcon()}>✏️</button>}
+                  {canWrite && <button onClick={() => { setVente({ date: v.date, client: v.client, canal: v.canal, nbPoulets: v.nbPoulets, prixUnit: v.prixUnit, typeVente: "comptant", acompte: "", dateEcheance: "" }); setEditVenteId(v.id); setShowVente(true); }} style={S.btnIcon()}>✏️</button>}
                   {canWrite && <button onClick={() => delVente(v.id)} style={S.btnIcon("#FFF0F0")}>🗑️</button>}
                 </div>
               </div>
@@ -550,10 +640,72 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
         }
       </>}
 
+      {tab === "credits" && <>
+        {canWrite && <button onClick={() => { setEditVenteId(null); setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "credit", acompte: "", dateEcheance: "" }); setShowVente(true); }} style={S.btn("#E67E22")}>+ Vente à crédit</button>}
+
+        {/* Résumé crédits */}
+        {credits.length > 0 && (
+          <div style={S.kpiRow}>
+            <div style={S.kpi("#C0392B")}><div style={{ fontSize: 15, fontWeight: 800 }}>{fmt(totalCreditDu)}</div><div style={S.kpiLbl}>Total dû</div></div>
+            <div style={S.kpi("#1E8449")}><div style={{ fontSize: 15, fontWeight: 800 }}>{fmt(totalCreditRecu)}</div><div style={S.kpiLbl}>Total reçu</div></div>
+          </div>
+        )}
+
+        {credits.length === 0
+          ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>💳</div><p>Aucune vente à crédit</p></div>
+          : credits.map(c => {
+            const [showPaiement, setShowPaiement] = useState(false);
+            const [montantSupp, setMontantSupp] = useState("");
+            return (
+              <div key={c.id} style={{ ...S.card, borderLeft: `4px solid ${creditStatutColor[c.statut] || "#888"}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 800, fontSize: 14 }}>{c.client}</span>
+                      <span style={S.tag(creditStatutColor[c.statut] || "#888")}>{creditStatutLabel[c.statut] || c.statut}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888" }}>{c.nbPoulets} poulets × {fmt(c.prixUnit)} • {c.date}</div>
+                    <span style={S.tag("#1A5276")}>{c.canal}</span>
+                    {c.dateEcheance && <div style={{ fontSize: 11, color: "#E67E22", marginTop: 4 }}>📅 Échéance : {c.dateEcheance}</div>}
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#0F2940" }}>Total : {fmt(c.total)}</div>
+                    <div style={{ fontSize: 12, color: "#1E8449" }}>Reçu : {fmt(c.montantRecu)}</div>
+                    <div style={{ fontSize: 12, color: "#C0392B", fontWeight: 700 }}>Dû : {fmt(c.resteDu)}</div>
+                  </div>
+                </div>
+
+                {/* Barre de progression paiement */}
+                <div style={{ height: 6, borderRadius: 3, background: "#E8ECF0", marginBottom: 8 }}>
+                  <div style={{ ...S.bar(c.total > 0 ? (c.montantRecu / c.total * 100) : 0, "#1E8449") }} />
+                </div>
+
+                {canWrite && c.statut !== "payé" && (
+                  <div>
+                    {!showPaiement
+                      ? <button onClick={() => setShowPaiement(true)} style={{ ...S.btnSm("#1E8449"), width: "100%", padding: "8px" }}>💰 Enregistrer un paiement</button>
+                      : <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                          <input type="number" value={montantSupp} onChange={e => setMontantSupp(e.target.value)} placeholder="Montant reçu (FCFA)" style={{ ...S.input, marginBottom: 0, flex: 1 }} />
+                          <button onClick={() => { marquerPayé(c, montantSupp); setShowPaiement(false); setMontantSupp(""); }} style={S.btnSm("#1E8449")}>✅</button>
+                          <button onClick={() => setShowPaiement(false)} style={S.btnSm("#888")}>✕</button>
+                        </div>
+                    }
+                  </div>
+                )}
+                <SigLine auteur={c.auteur} heureAction={c.heureAction} modifiePar={c.modifiePar} heureModif={c.heureModif} />
+                {canWrite && <button onClick={() => delCredit(c.id)} style={{ ...S.btnIcon("#FFF0F0"), marginTop: 6 }}>🗑️ Supprimer</button>}
+              </div>
+            );
+          })
+        }
+      </>}
+
       {tab === "dividendes" && <>
         <div style={{ ...S.card, background: benefice > 0 ? "#F0FFF4" : "#FFF5F5", border: `1.5px solid ${benefice > 0 ? "#1E8449" : "#C0392B"}` }}>
           <p style={{ fontWeight: 700, color: "#0F2940", marginBottom: 6 }}>Résultat net distribuable</p>
           <p style={{ fontSize: 24, fontWeight: 800, color: benefice > 0 ? "#1E8449" : "#C0392B", margin: 0 }}>{fmt(benefice)}</p>
+          {argentBande1 > 0 && <p style={{ fontSize: 11, color: "#888", marginTop: 4 }}>Dont {fmt(argentBande1)} de la bande 1</p>}
+          {totalCreditDu > 0 && <p style={{ fontSize: 11, color: "#E67E22", marginTop: 2 }}>+ {fmt(totalCreditDu)} de crédits en attente</p>}
           {benefice === 0 && <p style={{ fontSize: 11, color: "#C0392B", marginTop: 4 }}>⚠️ Pas de dividendes tant que le résultat est négatif</p>}
         </div>
         {ASSOCIES.map(a => (
@@ -572,6 +724,17 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
         ))}
       </>}
 
+      {/* Modals */}
+      {showBande1 && (
+        <Modal title="💛 Solde Bande 1" onClose={() => setShowBande1(false)}>
+          <Field label="Argent restant (FCFA)" type="number" val={bande1Form.argentRestant} set={v => setBande1Form(p => ({ ...p, argentRestant: v }))} />
+          <Field label="Poulets restants à vendre" type="number" val={bande1Form.nbPoussinsRestants} set={v => setBande1Form(p => ({ ...p, nbPoussinsRestants: v }))} />
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 2 }}>Notes</label>
+          <textarea value={bande1Form.notes} onChange={e => setBande1Form(p => ({ ...p, notes: e.target.value }))} style={{ ...S.input, height: 60, resize: "none" }} placeholder="Observations sur la bande 1..." />
+          <button onClick={saveBande1} style={S.btn("#92400E")}>✅ Enregistrer</button>
+        </Modal>
+      )}
+
       {showDep && (
         <Modal title={editDepId ? "✏️ Modifier la dépense" : "Nouvelle dépense"} onClose={() => { setShowDep(false); setEditDepId(null); }}>
           <Field label="Catégorie" val={dep.categorie} set={v => setDep(p => ({ ...p, categorie: v }))} options={cats} />
@@ -583,14 +746,32 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
       )}
 
       {showVente && (
-        <Modal title={editVenteId ? "✏️ Modifier la vente" : "Nouvelle vente"} onClose={() => { setShowVente(false); setEditVenteId(null); }}>
+        <Modal title={editVenteId ? "✏️ Modifier la vente" : vente.typeVente === "credit" ? "💳 Vente à crédit" : "🛒 Nouvelle vente"} onClose={() => { setShowVente(false); setEditVenteId(null); }}>
+          {/* Type de vente */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            {[["comptant", "💵 Comptant"], ["credit", "💳 À crédit"]].map(([val, label]) => (
+              <button key={val} onClick={() => setVente(v => ({ ...v, typeVente: val }))}
+                style={{ flex: 1, padding: "8px", borderRadius: 10, border: `2px solid ${vente.typeVente === val ? "#1A5276" : "#E0E6ED"}`, fontWeight: 700, fontSize: 12, cursor: "pointer", background: vente.typeVente === val ? "#1A5276" : "#fff", color: vente.typeVente === val ? "#fff" : "#666" }}>
+                {label}
+              </button>
+            ))}
+          </div>
           <Field label="Date" type="date" val={vente.date} set={v => setVente(p => ({ ...p, date: v }))} />
           <Field label="Client / Acheteur" type="text" val={vente.client} set={v => setVente(p => ({ ...p, client: v }))} />
           <Field label="Canal de vente" type="text" val={vente.canal} set={v => setVente(p => ({ ...p, canal: v }))} />
           <Field label="Nombre de poulets" type="number" val={vente.nbPoulets} set={v => setVente(p => ({ ...p, nbPoulets: v }))} />
           <Field label="Prix unitaire (FCFA)" type="number" val={vente.prixUnit} set={v => setVente(p => ({ ...p, prixUnit: v }))} />
-          {vente.nbPoulets && vente.prixUnit && <div style={S.alert("#1E8449")}><span style={{ fontWeight: 800, color: "#1E8449" }}>Total : {fmt(Number(vente.nbPoulets) * Number(vente.prixUnit))}</span></div>}
-          <button onClick={saveVente} style={S.btn("#1E8449")}>{editVenteId ? "✅ Modifier" : "✅ Enregistrer"}</button>
+          {vente.typeVente === "credit" && <>
+            <Field label="Acompte reçu maintenant (FCFA, 0 si rien)" type="number" val={vente.acompte} set={v => setVente(p => ({ ...p, acompte: v }))} />
+            <Field label="Date d'échéance prévue" type="date" val={vente.dateEcheance} set={v => setVente(p => ({ ...p, dateEcheance: v }))} />
+          </>}
+          {vente.nbPoulets && vente.prixUnit && (
+            <div style={S.alert("#1E8449")}>
+              <div style={{ fontWeight: 800, color: "#1E8449" }}>Total : {fmt(Number(vente.nbPoulets) * Number(vente.prixUnit))}</div>
+              {vente.typeVente === "credit" && vente.acompte && <div style={{ fontSize: 12, color: "#E67E22", marginTop: 2 }}>Reste dû : {fmt(Number(vente.nbPoulets) * Number(vente.prixUnit) - Number(vente.acompte))}</div>}
+            </div>
+          )}
+          <button onClick={saveVente} style={S.btn(vente.typeVente === "credit" ? "#E67E22" : "#1E8449")}>{editVenteId ? "✅ Modifier" : "✅ Enregistrer"}</button>
         </Modal>
       )}
 
