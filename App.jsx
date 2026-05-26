@@ -403,6 +403,50 @@ function SuiviQuotidien({ suivi, userInfo, bandeCfg, bandeActive }) {
   );
 }
 
+// ── CARTE CRÉDIT (composant séparé pour éviter useState dans map) ─
+function CreditCard({ c, canWrite, marquerPayé, delCredit, creditStatutColor, creditStatutLabel }) {
+  const [showPaiement, setShowPaiement] = useState(false);
+  const [montantSupp, setMontantSupp] = useState("");
+  return (
+    <div style={{ ...S.card, borderLeft: `4px solid ${creditStatutColor[c.statut] || "#888"}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <span style={{ fontWeight: 800, fontSize: 14 }}>{c.client}</span>
+            <span style={S.tag(creditStatutColor[c.statut] || "#888")}>{creditStatutLabel[c.statut] || c.statut}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#888" }}>{c.nbPoulets} poulets × {fmt(c.prixUnit)} • {c.date}</div>
+          <span style={S.tag("#1A5276")}>{c.canal}</span>
+          {c.dateEcheance && <div style={{ fontSize: 11, color: "#E67E22", marginTop: 4 }}>📅 Échéance : {c.dateEcheance}</div>}
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#0F2940" }}>Total : {fmt(c.total)}</div>
+          <div style={{ fontSize: 12, color: "#1E8449" }}>Reçu : {fmt(c.montantRecu)}</div>
+          <div style={{ fontSize: 12, color: "#C0392B", fontWeight: 700 }}>Dû : {fmt(c.resteDu)}</div>
+        </div>
+      </div>
+      <div style={{ height: 6, borderRadius: 3, background: "#E8ECF0", marginBottom: 8 }}>
+        <div style={S.bar(c.total > 0 ? (c.montantRecu / c.total * 100) : 0, "#1E8449")} />
+      </div>
+      {canWrite && c.statut !== "payé" && (
+        <div>
+          {!showPaiement
+            ? <button onClick={() => setShowPaiement(true)} style={{ ...S.btnSm("#1E8449"), width: "100%", padding: "8px" }}>💰 Enregistrer un paiement</button>
+            : <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                <input type="number" value={montantSupp} onChange={e => setMontantSupp(e.target.value)}
+                  placeholder="Montant reçu (FCFA)" style={{ ...S.input, marginBottom: 0, flex: 1 }} />
+                <button onClick={() => { marquerPayé(c, montantSupp); setShowPaiement(false); setMontantSupp(""); }} style={S.btnSm("#1E8449")}>✅</button>
+                <button onClick={() => setShowPaiement(false)} style={S.btnSm("#888")}>✕</button>
+              </div>
+          }
+        </div>
+      )}
+      <SigLine auteur={c.auteur} heureAction={c.heureAction} modifiePar={c.modifiePar} heureModif={c.heureModif} />
+      {canWrite && <button onClick={() => delCredit(c.id)} style={{ ...S.btnIcon("#FFF0F0"), marginTop: 6 }}>🗑️ Supprimer</button>}
+    </div>
+  );
+}
+
 // ── FINANCES ──────────────────────────────────────────────────────
 function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeCfg }) {
   const [tab, setTab] = useState("depenses");
@@ -413,7 +457,7 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
   const [showCredit, setShowCredit] = useState(false);
   const [dep, setDep] = useState({ date: "", categorie: "", description: "", montant: "" });
   const [vente, setVente] = useState({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "comptant", acompte: "", dateEcheance: "" });
-  const [stockAjout, setStockAjout] = useState({ qte: "", type: "Aliment Démarrage" });
+  const [stockAjout, setStockAjout] = useState({ qte: "", type: "Aliment Démarrage", mode: "ajouter", nbSacs: "", stockReel: "" });
   const [bande1Form, setBande1Form] = useState({ argentRestant: "", nbPoussinsRestants: "", notes: "" });
   const [editDepId, setEditDepId] = useState(null);
   const [editVenteId, setEditVenteId] = useState(null);
@@ -488,10 +532,16 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
   };
 
   const updateStock = async () => {
-    const newStock = stock + Number(stockAjout.qte || 0);
+    let newStock;
+    if (stockAjout.mode === "definir") {
+      newStock = Number(stockAjout.stockReel || 0);
+    } else {
+      newStock = stock + Number(stockAjout.qte || 0);
+    }
     await updateDoc(doc(db, "samapoulet", bandeActive), { stockAliments: newStock });
     setBandeCfg(p => ({ ...p, stockAliments: newStock }));
-    setStockAjout({ qte: "", type: "Aliment Démarrage" }); setShowStock(false);
+    setStockAjout({ qte: "", type: "Aliment Démarrage", mode: "ajouter", nbSacs: "", stockReel: "" });
+    setShowStock(false);
   };
 
   const saveBande1 = async () => {
@@ -653,50 +703,10 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
 
         {credits.length === 0
           ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>💳</div><p>Aucune vente à crédit</p></div>
-          : credits.map(c => {
-            const [showPaiement, setShowPaiement] = useState(false);
-            const [montantSupp, setMontantSupp] = useState("");
-            return (
-              <div key={c.id} style={{ ...S.card, borderLeft: `4px solid ${creditStatutColor[c.statut] || "#888"}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <span style={{ fontWeight: 800, fontSize: 14 }}>{c.client}</span>
-                      <span style={S.tag(creditStatutColor[c.statut] || "#888")}>{creditStatutLabel[c.statut] || c.statut}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: "#888" }}>{c.nbPoulets} poulets × {fmt(c.prixUnit)} • {c.date}</div>
-                    <span style={S.tag("#1A5276")}>{c.canal}</span>
-                    {c.dateEcheance && <div style={{ fontSize: 11, color: "#E67E22", marginTop: 4 }}>📅 Échéance : {c.dateEcheance}</div>}
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#0F2940" }}>Total : {fmt(c.total)}</div>
-                    <div style={{ fontSize: 12, color: "#1E8449" }}>Reçu : {fmt(c.montantRecu)}</div>
-                    <div style={{ fontSize: 12, color: "#C0392B", fontWeight: 700 }}>Dû : {fmt(c.resteDu)}</div>
-                  </div>
-                </div>
-
-                {/* Barre de progression paiement */}
-                <div style={{ height: 6, borderRadius: 3, background: "#E8ECF0", marginBottom: 8 }}>
-                  <div style={{ ...S.bar(c.total > 0 ? (c.montantRecu / c.total * 100) : 0, "#1E8449") }} />
-                </div>
-
-                {canWrite && c.statut !== "payé" && (
-                  <div>
-                    {!showPaiement
-                      ? <button onClick={() => setShowPaiement(true)} style={{ ...S.btnSm("#1E8449"), width: "100%", padding: "8px" }}>💰 Enregistrer un paiement</button>
-                      : <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                          <input type="number" value={montantSupp} onChange={e => setMontantSupp(e.target.value)} placeholder="Montant reçu (FCFA)" style={{ ...S.input, marginBottom: 0, flex: 1 }} />
-                          <button onClick={() => { marquerPayé(c, montantSupp); setShowPaiement(false); setMontantSupp(""); }} style={S.btnSm("#1E8449")}>✅</button>
-                          <button onClick={() => setShowPaiement(false)} style={S.btnSm("#888")}>✕</button>
-                        </div>
-                    }
-                  </div>
-                )}
-                <SigLine auteur={c.auteur} heureAction={c.heureAction} modifiePar={c.modifiePar} heureModif={c.heureModif} />
-                {canWrite && <button onClick={() => delCredit(c.id)} style={{ ...S.btnIcon("#FFF0F0"), marginTop: 6 }}>🗑️ Supprimer</button>}
-              </div>
-            );
-          })
+          : credits.map(c => (
+            <CreditCard key={c.id} c={c} canWrite={canWrite} marquerPayé={marquerPayé} delCredit={delCredit}
+              creditStatutColor={creditStatutColor} creditStatutLabel={creditStatutLabel} />
+          ))
         }
       </>}
 
@@ -776,11 +786,34 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
       )}
 
       {showStock && (
-        <Modal title="📦 Approvisionner le stock" onClose={() => setShowStock(false)}>
+        <Modal title="📦 Mettre à jour le stock aliments" onClose={() => setShowStock(false)}>
+          <div style={{ ...S.card, background: "#F8F9FA", marginBottom: 8 }}>
+            <p style={{ fontSize: 13, color: "#555", margin: 0 }}>Stock actuel : <strong style={{ color: stock < 50 ? "#C0392B" : "#1E8449" }}>{fmtN(stock)} kg</strong></p>
+            <p style={{ fontSize: 11, color: "#888", marginTop: 4, marginBottom: 0 }}>1 sac = 50 kg • Entrez le nombre de sacs terminés ou le kg restant réel</p>
+          </div>
           <Field label="Type d'aliment" val={stockAjout.type} set={v => setStockAjout(p => ({ ...p, type: v }))}
             options={["Aliment Démarrage", "Aliment Croissance", "Aliment Finition"]} />
-          <Field label="Quantité ajoutée (kg)" type="number" val={stockAjout.qte} set={v => setStockAjout(p => ({ ...p, qte: v }))} />
-          {stockAjout.qte && <div style={S.alert("#1E8449")}><span style={{ fontWeight: 700, color: "#1E8449" }}>Nouveau stock : {fmtN(stock + Number(stockAjout.qte))} kg</span></div>}
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button onClick={() => setStockAjout(p => ({ ...p, mode: "ajouter" }))}
+              style={{ flex: 1, padding: "8px", borderRadius: 10, border: `2px solid ${stockAjout.mode !== "definir" ? "#1A5276" : "#E0E6ED"}`, fontWeight: 700, fontSize: 12, cursor: "pointer", background: stockAjout.mode !== "definir" ? "#1A5276" : "#fff", color: stockAjout.mode !== "definir" ? "#fff" : "#666" }}>
+              ➕ Ajouter des sacs
+            </button>
+            <button onClick={() => setStockAjout(p => ({ ...p, mode: "definir" }))}
+              style={{ flex: 1, padding: "8px", borderRadius: 10, border: `2px solid ${stockAjout.mode === "definir" ? "#1A5276" : "#E0E6ED"}`, fontWeight: 700, fontSize: 12, cursor: "pointer", background: stockAjout.mode === "definir" ? "#1A5276" : "#fff", color: stockAjout.mode === "definir" ? "#fff" : "#666" }}>
+              ✏️ Définir le stock
+            </button>
+          </div>
+          {stockAjout.mode !== "definir" ? (
+            <>
+              <Field label="Nombre de sacs ajoutés (50 kg/sac)" type="number" val={stockAjout.nbSacs} set={v => setStockAjout(p => ({ ...p, nbSacs: v, qte: String(Number(v) * 50) }))} />
+              {stockAjout.nbSacs && <div style={S.alert("#1E8449")}><span style={{ fontWeight: 700, color: "#1E8449" }}>+{fmtN(Number(stockAjout.nbSacs) * 50)} kg → Nouveau stock : {fmtN(stock + Number(stockAjout.nbSacs) * 50)} kg</span></div>}
+            </>
+          ) : (
+            <>
+              <Field label="Stock réel actuel (kg)" type="number" val={stockAjout.stockReel} set={v => setStockAjout(p => ({ ...p, stockReel: v }))} />
+              {stockAjout.stockReel && <div style={S.alert("#1A5276")}><span style={{ fontWeight: 700, color: "#1A5276" }}>Nouveau stock défini : {fmtN(stockAjout.stockReel)} kg</span></div>}
+            </>
+          )}
           <button onClick={updateStock} style={S.btn("#1A5276")}>✅ Mettre à jour</button>
         </Modal>
       )}
