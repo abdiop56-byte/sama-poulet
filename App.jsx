@@ -605,12 +605,6 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
       montantRecu: newMontantRecu, resteDu: Math.max(newResteDu, 0), statut: newStatut,
       modifiePar: userInfo?.nom, heureModif: nowTime()
     });
-    // Si payé totalement → transférer dans ventes normales
-    if (newStatut === "payé") {
-      await addDoc(collection(db, "samapoulet", bandeActive, "ventes"), {
-        ...credit, total: credit.total, ...makeSig(userInfo), notes: "Crédit soldé"
-      });
-    }
   };
 
   const delDep = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "depenses", id)); };
