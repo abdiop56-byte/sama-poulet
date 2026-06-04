@@ -455,14 +455,17 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
   const [showStock, setShowStock] = useState(false);
   const [showBande1, setShowBande1] = useState(false);
   const [showCredit, setShowCredit] = useState(false);
+  const [showVenteBande1, setShowVenteBande1] = useState(false);
   const [dep, setDep] = useState({ date: "", categorie: "", description: "", montant: "" });
   const [vente, setVente] = useState({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "comptant", acompte: "", dateEcheance: "" });
+  const [venteBande1Form, setVenteBande1Form] = useState({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" });
   const [stockAjout, setStockAjout] = useState({ qte: "", type: "Aliment Démarrage", mode: "ajouter", nbSacs: "", stockReel: "" });
   const [bande1Form, setBande1Form] = useState({ argentRestant: "", nbPoussinsRestants: "", notes: "" });
   const [editDepId, setEditDepId] = useState(null);
   const [editVenteId, setEditVenteId] = useState(null);
   const [credits, setCredits] = useState([]);
   const [bande1Data, setBande1Data] = useState(null);
+  const [ventesBande1, setVentesBande1] = useState([]);
 
   if (!PERMS[userInfo?.role]?.finances) return <AccessDenied />;
   const canWrite = WRITE_PERMS[userInfo?.role]?.finances;
@@ -474,7 +477,30 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
     });
     const q = query(collection(db, "samapoulet", bandeActive, "credits"), orderBy("createdAt", "desc"));
     const unsub2 = onSnapshot(q, snap => setCredits(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    return () => { unsub1(); unsub2(); };
+    // Ventes bande 1 séparées
+    const q3 = query(collection(db, "samapoulet", "bande1", "ventes"), orderBy("createdAt", "desc"));
+    const unsub3 = onSnapshot(q3, snap => setVentesBande1(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => { unsub1(); unsub2(); unsub3(); };
+  }, [bandeActive]);
+
+  // Vérifier loyer au chargement
+  useEffect(() => {
+    const checkLoyer = async () => {
+      if (!bandeActive || !canWrite) return;
+      const loyerRef = doc(db, "samapoulet", bandeActive, "depenses", "loyer_poulailler");
+      const snap = await getDoc(loyerRef);
+      if (!snap.exists()) {
+        const confirm = window.confirm("💡 Voulez-vous ajouter le loyer du poulailler (50 000 FCFA) pour cette bande ?");
+        if (confirm) {
+          await setDoc(loyerRef, {
+            categorie: "Loyer poulailler", description: "Loyer — Grande sœur Laye",
+            montant: 50000, date: new Date().toLocaleDateString("fr-FR"),
+            ...makeSig(userInfo)
+          });
+        }
+      }
+    };
+    if (userInfo?.role === "admin") checkLoyer();
   }, [bandeActive]);
 
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
@@ -553,6 +579,24 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
     setShowBande1(false);
   };
 
+  const saveVenteBande1 = async () => {
+    if (!venteBande1Form.nbPoulets || !venteBande1Form.prixUnit) return;
+    const total = Number(venteBande1Form.nbPoulets) * Number(venteBande1Form.prixUnit);
+    await addDoc(collection(db, "samapoulet", "bande1", "ventes"), {
+      ...venteBande1Form, nbPoulets: Number(venteBande1Form.nbPoulets),
+      prixUnit: Number(venteBande1Form.prixUnit), total, ...makeSig(userInfo)
+    });
+    // Mettre à jour nb poulets restants bande 1
+    const newNb = Math.max((bande1Data?.nbPoussinsRestants || 0) - Number(venteBande1Form.nbPoulets), 0);
+    const newArgent = (bande1Data?.argentRestant || 0) + total;
+    await setDoc(doc(db, "samapoulet", "config", "global", "bande1Solde"), {
+      ...bande1Data, nbPoussinsRestants: newNb, argentRestant: newArgent,
+      modifiePar: userInfo?.nom, heureModif: nowTime(), updatedAt: new Date().toISOString()
+    });
+    setVenteBande1Form({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "" });
+    setShowVenteBande1(false);
+  };
+
   const marquerPayé = async (credit, montantSupp) => {
     const newMontantRecu = Number(credit.montantRecu || 0) + Number(montantSupp || 0);
     const newResteDu = Number(credit.total || 0) - newMontantRecu;
@@ -596,21 +640,41 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
       {/* Bande 1 solde */}
       <div style={{ ...S.card, border: "1.5px solid #C9A84C", background: "#FFFBEB" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <p style={{ ...S.cardTitle, marginBottom: 0, color: "#92400E" }}>🐣 Solde Bande 1</p>
-          {canWrite && <button onClick={() => { setBande1Form({ argentRestant: bande1Data?.argentRestant || "", nbPoussinsRestants: bande1Data?.nbPoussinsRestants || "", notes: bande1Data?.notes || "" }); setShowBande1(true); }} style={S.btnSm("#92400E")}>✏️ Modifier</button>}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#1E8449" }}>{fmt(argentBande1)}</div>
-            <div style={{ fontSize: 11, color: "#888" }}>Argent restant</div>
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#E67E22" }}>{fmtN(bande1Data?.nbPoussinsRestants || 0)}</div>
-            <div style={{ fontSize: 11, color: "#888" }}>Poulets restants</div>
+          <p style={{ ...S.cardTitle, marginBottom: 0, color: "#92400E" }}>🐣 Bande 1 — Solde & Ventes</p>
+          <div style={{ display: "flex", gap: 6 }}>
+            {canWrite && <button onClick={() => setShowVenteBande1(true)} style={S.btnSm("#1E8449")}>+ Vente</button>}
+            {canWrite && <button onClick={() => { setBande1Form({ argentRestant: bande1Data?.argentRestant || "", nbPoussinsRestants: bande1Data?.nbPoussinsRestants || "", notes: bande1Data?.notes || "" }); setShowBande1(true); }} style={S.btnSm("#92400E")}>✏️</button>}
           </div>
         </div>
-        {bande1Data?.notes && <p style={{ fontSize: 11, color: "#888", fontStyle: "italic", marginTop: 8, marginBottom: 0 }}>"{bande1Data.notes}"</p>}
-        {!bande1Data && canWrite && <p style={{ fontSize: 12, color: "#E67E22", margin: "8px 0 0" }}>👆 Cliquez "Modifier" pour renseigner le solde bande 1</p>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#1E8449" }}>{fmt(argentBande1)}</div>
+            <div style={{ fontSize: 10, color: "#888" }}>Argent</div>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#E67E22" }}>{fmtN(bande1Data?.nbPoussinsRestants || 0)}</div>
+            <div style={{ fontSize: 10, color: "#888" }}>Poulets restants</div>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#1A5276" }}>{fmt(ventesBande1.reduce((s, v) => s + Number(v.total || 0), 0))}</div>
+            <div style={{ fontSize: 10, color: "#888" }}>CA bande 1</div>
+          </div>
+        </div>
+        {ventesBande1.length > 0 && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, color: "#92400E", margin: "0 0 6px" }}>Ventes récentes :</p>
+            {ventesBande1.slice(0, 3).map(v => (
+              <div key={v.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #F5F0E8" }}>
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{v.client}</span>
+                  <span style={{ fontSize: 11, color: "#888" }}> • {v.nbPoulets} poulets • {v.date}</span>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "#1E8449" }}>{fmt(v.total)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!bande1Data && canWrite && <p style={{ fontSize: 12, color: "#E67E22", margin: "8px 0 0" }}>👆 Cliquez ✏️ pour renseigner le solde bande 1</p>}
       </div>
 
       {/* Stock Aliments */}
@@ -745,6 +809,26 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
         </Modal>
       )}
 
+      {showVenteBande1 && (
+        <Modal title="🐣 Vente Bande 1" onClose={() => setShowVenteBande1(false)}>
+          <div style={S.alert("#E67E22")}>
+            <span style={{ fontSize: 12, color: "#92400E" }}>⚠️ Cette vente sera enregistrée dans la <strong>Bande 1</strong>, pas dans la bande active.</span>
+          </div>
+          <Field label="Date" type="date" val={venteBande1Form.date} set={v => setVenteBande1Form(p => ({ ...p, date: v }))} />
+          <Field label="Client / Acheteur" type="text" val={venteBande1Form.client} set={v => setVenteBande1Form(p => ({ ...p, client: v }))} />
+          <Field label="Canal de vente" type="text" val={venteBande1Form.canal} set={v => setVenteBande1Form(p => ({ ...p, canal: v }))} />
+          <Field label="Nombre de poulets" type="number" val={venteBande1Form.nbPoulets} set={v => setVenteBande1Form(p => ({ ...p, nbPoulets: v }))} />
+          <Field label="Prix unitaire (FCFA)" type="number" val={venteBande1Form.prixUnit} set={v => setVenteBande1Form(p => ({ ...p, prixUnit: v }))} />
+          {venteBande1Form.nbPoulets && venteBande1Form.prixUnit && (
+            <div style={S.alert("#1E8449")}>
+              <span style={{ fontWeight: 800, color: "#1E8449" }}>Total : {fmt(Number(venteBande1Form.nbPoulets) * Number(venteBande1Form.prixUnit))}</span>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Poulets restants après : {Math.max((bande1Data?.nbPoussinsRestants || 0) - Number(venteBande1Form.nbPoulets), 0)}</div>
+            </div>
+          )}
+          <button onClick={saveVenteBande1} style={S.btn("#1E8449")}>✅ Enregistrer la vente bande 1</button>
+        </Modal>
+      )}
+
       {showDep && (
         <Modal title={editDepId ? "✏️ Modifier la dépense" : "Nouvelle dépense"} onClose={() => { setShowDep(false); setEditDepId(null); }}>
           <Field label="Catégorie" val={dep.categorie} set={v => setDep(p => ({ ...p, categorie: v }))} options={cats} />
@@ -824,7 +908,9 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
 // ── SANTÉ ─────────────────────────────────────────────────────────
 function Sante({ vaccins, incidents, userInfo, bandeActive }) {
   const [showInc, setShowInc] = useState(false);
+  const [showVaccin, setShowVaccin] = useState(false);
   const [inc, setInc] = useState({ date: "", symptomes: "", nbAnimaux: "", traitement: "" });
+  const [newVaccin, setNewVaccin] = useState({ vaccin: "", semaine: "", datePrevue: "", voie: "" });
 
   if (!PERMS[userInfo?.role]?.sante) return <AccessDenied />;
   const canWrite = WRITE_PERMS[userInfo?.role]?.sante;
@@ -836,6 +922,22 @@ function Sante({ vaccins, incidents, userInfo, bandeActive }) {
     });
   };
 
+  const saveVaccin = async () => {
+    if (!newVaccin.vaccin) return;
+    const id = `v_custom_${Date.now()}`;
+    await setDoc(doc(db, "samapoulet", bandeActive, "vaccinations", id), {
+      ...newVaccin, semaine: Number(newVaccin.semaine || 0),
+      fait: false, dateReelle: "", custom: true, ...makeSig(userInfo)
+    });
+    setNewVaccin({ vaccin: "", semaine: "", datePrevue: "", voie: "" });
+    setShowVaccin(false);
+  };
+
+  const delVaccin = async (v) => {
+    if (!v.custom) { alert("Les vaccins du programme de base ne peuvent pas être supprimés."); return; }
+    if (window.confirm("Supprimer ce vaccin ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "vaccinations", v.id));
+  };
+
   const saveInc = async () => {
     await addDoc(collection(db, "samapoulet", bandeActive, "incidents"), { ...inc, ...makeSig(userInfo) });
     setInc({ date: "", symptomes: "", nbAnimaux: "", traitement: "" }); setShowInc(false);
@@ -843,12 +945,20 @@ function Sante({ vaccins, incidents, userInfo, bandeActive }) {
 
   const delInc = async (id) => { if (window.confirm("Supprimer cet incident ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "incidents", id)); };
 
+  const vaccinsBase = vaccins.filter(v => !v.custom);
+  const vaccinsCustom = vaccins.filter(v => v.custom);
+
   return (
     <div style={S.section}>
       <p style={S.sectionTitle}>💉 Santé</p>
       <div style={S.card}>
-        <p style={S.cardTitle}>Programme de Vaccination</p>
-        {vaccins.map(v => (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <p style={{ ...S.cardTitle, marginBottom: 0 }}>Programme de Vaccination</p>
+          {canWrite && <button onClick={() => setShowVaccin(true)} style={S.btnSm("#6C3483")}>+ Vaccin</button>}
+        </div>
+
+        {/* Vaccins de base */}
+        {vaccinsBase.map(v => (
           <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid #F0F4F8" }}>
             <button onClick={() => canWrite && toggleVacc(v)} style={{ width: 28, height: 28, borderRadius: 14, border: `2px solid ${v.fait ? "#1E8449" : "#DDD"}`, background: v.fait ? "#1E8449" : "#fff", cursor: canWrite ? "pointer" : "default", color: "#fff", fontWeight: 800, flexShrink: 0, fontSize: 14, opacity: canWrite ? 1 : 0.6 }}>{v.fait ? "✓" : ""}</button>
             <div style={{ flex: 1 }}>
@@ -859,6 +969,33 @@ function Sante({ vaccins, incidents, userInfo, bandeActive }) {
             <span style={S.tag(v.fait ? "#1E8449" : "#E67E22")}>{v.fait ? "Fait ✓" : "À faire"}</span>
           </div>
         ))}
+
+        {/* Vaccins personnalisés */}
+        {vaccinsCustom.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#6C3483", margin: "12px 0 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>Vaccins ajoutés</div>
+            {vaccinsCustom.map(v => (
+              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid #F0F4F8" }}>
+                <button onClick={() => canWrite && toggleVacc(v)} style={{ width: 28, height: 28, borderRadius: 14, border: `2px solid ${v.fait ? "#6C3483" : "#DDD"}`, background: v.fait ? "#6C3483" : "#fff", cursor: canWrite ? "pointer" : "default", color: "#fff", fontWeight: 800, flexShrink: 0, fontSize: 14, opacity: canWrite ? 1 : 0.6 }}>{v.fait ? "✓" : ""}</button>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: v.fait ? "#888" : "#0F2940", textDecoration: v.fait ? "line-through" : "none" }}>{v.vaccin}</span>
+                    <span style={S.tag("#6C3483")}>Personnalisé</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#AAB7B8" }}>
+                    {v.semaine ? `Sem. ${v.semaine}` : ""}{v.datePrevue ? ` • Prévu : ${v.datePrevue}` : ""}
+                    {v.voie ? ` • ${v.voie}` : ""}
+                  </div>
+                  {v.fait && v.auteur && <div style={{ fontSize: 10, color: "#AAB7B8" }}>✍️ {v.auteur} • {v.heureAction}</div>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={S.tag(v.fait ? "#6C3483" : "#E67E22")}>{v.fait ? "Fait ✓" : "À faire"}</span>
+                  {canWrite && <button onClick={() => delVaccin(v)} style={S.btnIcon("#FFF0F0")}>🗑️</button>}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -889,6 +1026,17 @@ function Sante({ vaccins, incidents, userInfo, bandeActive }) {
           <Field label="Symptômes observés" type="text" val={inc.symptomes} set={v => setInc(p => ({ ...p, symptomes: v }))} />
           <Field label="Traitement prescrit" type="text" val={inc.traitement} set={v => setInc(p => ({ ...p, traitement: v }))} />
           <button onClick={saveInc} style={S.btn("#C0392B")}>🚨 Enregistrer l'incident</button>
+        </Modal>
+      )}
+
+      {showVaccin && (
+        <Modal title="💉 Ajouter un vaccin" onClose={() => setShowVaccin(false)}>
+          <Field label="Nom du vaccin *" type="text" val={newVaccin.vaccin} set={v => setNewVaccin(p => ({ ...p, vaccin: v }))} />
+          <Field label="Semaine prévue (ex: 4)" type="number" val={newVaccin.semaine} set={v => setNewVaccin(p => ({ ...p, semaine: v }))} />
+          <Field label="Date prévue" type="date" val={newVaccin.datePrevue} set={v => setNewVaccin(p => ({ ...p, datePrevue: v }))} />
+          <Field label="Voie d'administration" val={newVaccin.voie} set={v => setNewVaccin(p => ({ ...p, voie: v }))}
+            options={["Oculaire/Nasale", "Eau de boisson", "Injection", "Spray", "Autre"]} />
+          <button onClick={saveVaccin} style={S.btn("#6C3483")}>✅ Ajouter le vaccin</button>
         </Modal>
       )}
     </div>
