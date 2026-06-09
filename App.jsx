@@ -403,9 +403,39 @@ function SuiviQuotidien({ suivi, userInfo, bandeCfg, bandeActive }) {
   );
 }
 
+// ── CARTE VENTE ───────────────────────────────────────────────────
+function VenteCard({ v, canWrite, delVente, onEdit }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  return (
+    <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{v.client}</div>
+          <div style={{ fontSize: 11, color: "#888" }}>{v.nbPoulets} poulets × {fmt(v.prixUnit)} • {v.date}</div>
+          <span style={S.tag("#1A5276")}>{v.canal}</span>
+          {v.notes && <span style={{ ...S.tag("#888"), marginLeft: 4 }}>{v.notes}</span>}
+          <SigLine auteur={v.auteur} heureAction={v.heureAction} modifiePar={v.modifiePar} heureModif={v.heureModif} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontWeight: 800, color: "#1E8449", fontSize: 13 }}>{fmt(v.total)}</span>
+          {canWrite && <button onClick={onEdit} style={S.btnIcon()}>✏️</button>}
+          {canWrite && !confirmDel && <button onClick={() => setConfirmDel(true)} style={S.btnIcon("#FFF0F0")}>🗑️</button>}
+        </div>
+      </div>
+      {canWrite && confirmDel && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <button onClick={() => delVente(v.id)} style={{ ...S.btnSm("#C0392B"), flex: 1 }}>✅ Confirmer suppression</button>
+          <button onClick={() => setConfirmDel(false)} style={{ ...S.btnSm("#888"), flex: 1 }}>✕ Annuler</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── CARTE CRÉDIT (composant séparé pour éviter useState dans map) ─
 function CreditCard({ c, canWrite, marquerPayé, delCredit, creditStatutColor, creditStatutLabel }) {
   const [showPaiement, setShowPaiement] = useState(false);
+  const [showConfirmDel, setShowConfirmDel] = useState(false);
   const [montantSupp, setMontantSupp] = useState("");
   return (
     <div style={{ ...S.card, borderLeft: `4px solid ${creditStatutColor[c.statut] || "#888"}` }}>
@@ -442,7 +472,15 @@ function CreditCard({ c, canWrite, marquerPayé, delCredit, creditStatutColor, c
         </div>
       )}
       <SigLine auteur={c.auteur} heureAction={c.heureAction} modifiePar={c.modifiePar} heureModif={c.heureModif} />
-      {canWrite && <button onClick={() => delCredit(c.id)} style={{ ...S.btnIcon("#FFF0F0"), marginTop: 6 }}>🗑️ Supprimer</button>}
+      {canWrite && !showConfirmDel && (
+        <button onClick={() => setShowConfirmDel(true)} style={{ ...S.btnIcon("#FFF0F0"), marginTop: 6, width: "100%", padding: "6px" }}>🗑️ Supprimer</button>
+      )}
+      {canWrite && showConfirmDel && (
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <button onClick={() => delCredit(c.id)} style={{ ...S.btnSm("#C0392B"), flex: 1 }}>✅ Confirmer suppression</button>
+          <button onClick={() => setShowConfirmDel(false)} style={{ ...S.btnSm("#888"), flex: 1 }}>✕ Annuler</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -490,14 +528,11 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
       const loyerRef = doc(db, "samapoulet", bandeActive, "depenses", "loyer_poulailler");
       const snap = await getDoc(loyerRef);
       if (!snap.exists()) {
-        const confirm = window.confirm("💡 Voulez-vous ajouter le loyer du poulailler (50 000 FCFA) pour cette bande ?");
-        if (confirm) {
-          await setDoc(loyerRef, {
-            categorie: "Loyer poulailler", description: "Loyer — Grande sœur Laye",
-            montant: 50000, date: new Date().toLocaleDateString("fr-FR"),
-            ...makeSig(userInfo)
-          });
-        }
+        await setDoc(loyerRef, {
+          categorie: "Loyer poulailler", description: "Loyer — Grande sœur Laye",
+          montant: 50000, date: new Date().toLocaleDateString("fr-FR"),
+          ...makeSig(userInfo)
+        });
       }
     };
     if (userInfo?.role === "admin") checkLoyer();
@@ -608,8 +643,8 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
   };
 
   const delDep = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "depenses", id)); };
-  const delVente = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "ventes", id)); };
-  const delCredit = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "credits", id)); };
+  const delVente = async (id) => { await deleteDoc(doc(db, "samapoulet", bandeActive, "ventes", id)); };
+  const delCredit = async (id) => { await deleteDoc(doc(db, "samapoulet", bandeActive, "credits", id)); };
 
   const creditStatutColor = { "payé": "#1E8449", "partiel": "#E67E22", "impayé": "#C0392B" };
   const creditStatutLabel = { "payé": "✅ Payé", "partiel": "⏳ Partiel", "impayé": "🔴 Impayé" };
@@ -728,22 +763,8 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
         {ventes.length === 0
           ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>🛒</div><p>Aucune vente</p></div>
           : ventes.map(v => (
-            <div key={v.id} style={S.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{v.client}</div>
-                  <div style={{ fontSize: 11, color: "#888" }}>{v.nbPoulets} poulets × {fmt(v.prixUnit)} • {v.date}</div>
-                  <span style={S.tag("#1A5276")}>{v.canal}</span>
-                  {v.notes && <span style={{ ...S.tag("#888"), marginLeft: 4 }}>{v.notes}</span>}
-                  <SigLine auteur={v.auteur} heureAction={v.heureAction} modifiePar={v.modifiePar} heureModif={v.heureModif} />
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <span style={{ fontWeight: 800, color: "#1E8449", fontSize: 13 }}>{fmt(v.total)}</span>
-                  {canWrite && <button onClick={() => { setVente({ date: v.date, client: v.client, canal: v.canal, nbPoulets: v.nbPoulets, prixUnit: v.prixUnit, typeVente: "comptant", acompte: "", dateEcheance: "" }); setEditVenteId(v.id); setShowVente(true); }} style={S.btnIcon()}>✏️</button>}
-                  {canWrite && <button onClick={() => delVente(v.id)} style={S.btnIcon("#FFF0F0")}>🗑️</button>}
-                </div>
-              </div>
-            </div>
+            <VenteCard key={v.id} v={v} canWrite={canWrite} delVente={delVente}
+              onEdit={() => { setVente({ date: v.date, client: v.client, canal: v.canal, nbPoulets: v.nbPoulets, prixUnit: v.prixUnit, typeVente: "comptant", acompte: "", dateEcheance: "" }); setEditVenteId(v.id); setShowVente(true); }} />
           ))
         }
       </>}
