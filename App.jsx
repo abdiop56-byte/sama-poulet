@@ -266,7 +266,19 @@ function Dashboard({ suivi, depenses, ventes, vaccins, userInfo, bandeCfg }) {
       </div>
 
       <div style={S.section}>
-        {vaccsRestants > 0 && <div style={S.alert("#E67E22")}><span style={{ fontWeight: 700, color: "#E67E22" }}>💉 {vaccsRestants} vaccination(s)</span> à faire — voir onglet Santé</div>}
+        {userInfo?.role === "admin" && (
+          <div style={{ ...S.card, background: "#FFF0F0", border: "1.5px solid #C0392B" }}>
+            <p style={{ fontWeight: 700, color: "#C0392B", fontSize: 13, marginBottom: 8 }}>🛠️ Outil admin — Vider bande 2</p>
+            <button onClick={async () => {
+              try {
+                const { getDocs, collection: col, deleteDoc: del, doc: d } = await import("firebase/firestore");
+                const snap = await getDocs(col(db, "samapoulet", "bande2", "ventes"));
+                for (const dc of snap.docs) await del(d(db, "samapoulet", "bande2", "ventes", dc.id));
+                alert(`✅ ${snap.docs.length} vente(s) supprimée(s) !`);
+              } catch(e) { alert("Erreur : " + e.message); }
+            }} style={S.btn("#C0392B")}>🗑️ Supprimer toutes les ventes bande 2</button>
+          </div>
+        )}
         {Number(tauxMort) > 5 && <div style={S.alert("#C0392B")}><span style={{ fontWeight: 700, color: "#C0392B" }}>🚨 Mortalité {tauxMort}%</span> — seuil critique dépassé !</div>}
         {stock > 0 && stock < 50 && <div style={S.alert("#C0392B")}><span style={{ fontWeight: 700, color: "#C0392B" }}>⚠️ Stock aliments critique :</span> {fmtN(stock)} kg restants — approvisionner urgent !</div>}
 
