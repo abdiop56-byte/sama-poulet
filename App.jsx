@@ -521,22 +521,7 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [bandeActive]);
 
-  // Vérifier loyer au chargement
-  useEffect(() => {
-    const checkLoyer = async () => {
-      if (!bandeActive || !canWrite) return;
-      const loyerRef = doc(db, "samapoulet", bandeActive, "depenses", "loyer_poulailler");
-      const snap = await getDoc(loyerRef);
-      if (!snap.exists()) {
-        await setDoc(loyerRef, {
-          categorie: "Loyer poulailler", description: "Loyer — Grande sœur Laye",
-          montant: 50000, date: new Date().toLocaleDateString("fr-FR"),
-          ...makeSig(userInfo)
-        });
-      }
-    };
-    if (userInfo?.role === "admin") checkLoyer();
-  }, [bandeActive]);
+  // Loyer supprimé - à saisir manuellement si besoin
 
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
@@ -771,6 +756,17 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
 
       {tab === "credits" && <>
         {canWrite && <button onClick={() => { setEditVenteId(null); setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "credit", acompte: "", dateEcheance: "" }); setShowVente(true); }} style={S.btn("#E67E22")}>+ Vente à crédit</button>}
+
+        {/* Bouton vider tous les crédits — admin seulement */}
+        {userInfo?.role === "admin" && credits.length > 0 && (
+          <button onClick={async () => {
+            for (const c of credits) {
+              await deleteDoc(doc(db, "samapoulet", bandeActive, "credits", c.id));
+            }
+          }} style={{ ...S.btn("#C0392B"), marginBottom: 8, background: "#FFF0F0", color: "#C0392B", border: "1.5px solid #C0392B" }}>
+            🗑️ Supprimer tous les crédits ({credits.length})
+          </button>
+        )}
 
         {/* Résumé crédits */}
         {credits.length > 0 && (
