@@ -745,6 +745,17 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
       {tab === "ventes" && <>
         {canWrite && <button onClick={() => { setEditVenteId(null); setVente({ date: "", client: "", canal: "", nbPoulets: "", prixUnit: "", typeVente: "comptant", acompte: "", dateEcheance: "" }); setShowVente(true); }} style={S.btn("#1E8449")}>+ Enregistrer une vente</button>}
         {!canWrite && <div style={S.alert("#AAB7B8")}><span style={{ color: "#888" }}>👁️ Lecture seule</span></div>}
+
+        {/* Bouton vider toutes les ventes — admin seulement */}
+        {userInfo?.role === "admin" && ventes.length > 0 && (
+          <button onClick={async () => {
+            for (const v of ventes) {
+              await deleteDoc(doc(db, "samapoulet", bandeActive, "ventes", v.id));
+            }
+          }} style={{ ...S.btn("#C0392B"), marginBottom: 8, background: "#FFF0F0", color: "#C0392B", border: "1.5px solid #C0392B" }}>
+            🗑️ Supprimer toutes les ventes ({ventes.length})
+          </button>
+        )}
         {ventes.length === 0
           ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>🛒</div><p>Aucune vente</p></div>
           : ventes.map(v => (
