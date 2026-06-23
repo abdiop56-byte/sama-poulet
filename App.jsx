@@ -236,7 +236,7 @@ function Login() {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
-function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInfo, bandeCfg }) {
+function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInfo, bandeCfg, bandeActive }) {
   const poussins = bandeCfg?.poussinsDepart || 450;
   const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
   const effectif = poussins - totalMorts;
@@ -286,6 +286,30 @@ function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInf
                 alert(`✅ ${snap.docs.length} vente(s) supprimée(s) !`);
               } catch(e) { alert("Erreur : " + e.message); }
             }} style={S.btn("#C0392B")}>🗑️ Supprimer toutes les ventes bande 2</button>
+
+            <div style={{ height: 10 }} />
+            <p style={{ fontWeight: 700, color: "#6C3483", fontSize: 13, marginBottom: 8 }}>🔄 Migrer les crédits payés oubliés</p>
+            <button onClick={async () => {
+              try {
+                const { getDocs, collection: col, deleteDoc: del, doc: d, addDoc: add } = await import("firebase/firestore");
+                const cible = bandeActive || "bande2";
+                const snap = await getDocs(col(db, "samapoulet", cible, "credits"));
+                let migres = [];
+                for (const dc of snap.docs) {
+                  const data = dc.data();
+                  if (data.statut === "payé") {
+                    const { montantRecu, resteDu, statut, createdAt, ...rest } = data;
+                    await add(col(db, "samapoulet", cible, "ventes"), {
+                      ...rest, total: data.total, notes: "Crédit soldé (migré)",
+                      createdAt: createdAt || new Date().toISOString()
+                    });
+                    await del(d(db, "samapoulet", cible, "credits", dc.id));
+                    migres.push(data.client);
+                  }
+                }
+                alert(migres.length > 0 ? `✅ ${migres.length} crédit(s) migré(s) vers Ventes :\n${migres.join(", ")}` : "Aucun crédit payé trouvé à migrer.");
+              } catch(e) { alert("Erreur : " + e.message); }
+            }} style={S.btn("#6C3483")}>🔄 Migrer les crédits "payé" vers Ventes</button>
           </div>
         )}
         {Number(tauxMort) > 5 && <div style={S.alert("#C0392B")}><span style={{ fontWeight: 700, color: "#C0392B" }}>🚨 Mortalité {tauxMort}%</span> — seuil critique dépassé !</div>}
@@ -2547,7 +2571,7 @@ export default function App() {
         </div>
       )}
 
-      {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} />}
+      {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} />}
       {tab === "suivi" && <SuiviQuotidien suivi={suivi} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} />}
       {tab === "finances" && <Finances depenses={depenses} ventes={ventes} userInfo={userInfo} bandeActive={bandeActive} bandeCfg={bandeCfg} setBandeCfg={setBandeCfg} />}
       {tab === "analytics" && <Analytics suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} bandeCfg={bandeCfg} />}
