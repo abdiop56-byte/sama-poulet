@@ -86,6 +86,14 @@ const fmtN = (n) => Number(n || 0).toLocaleString("fr-FR");
 const nowTime = () => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 const makeSig = (u) => ({ auteur: u?.nom || "—", heureAction: nowTime(), createdAt: new Date().toISOString() });
 
+// Calcule le nombre total de poulets sortis (vendus comptant + crédit + sorties sans paiement)
+const calcNbSortis = (ventes = [], credits = [], sorties = []) => {
+  const nbVentes = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const nbCredits = credits.reduce((s, c) => s + Number(c.nbPoulets || 0), 0);
+  const nbSorties = sorties.reduce((s, x) => s + Number(x.nbPoulets || 0), 0);
+  return nbVentes + nbCredits + nbSorties;
+};
+
 const S = {
   app: { fontFamily: "'Segoe UI', sans-serif", background: "#F0F4F8", minHeight: "100vh", maxWidth: 430, margin: "0 auto", paddingBottom: 80 },
   header: { background: "linear-gradient(135deg, #0F2940, #1A4A7A)", padding: "20px 16px 16px", color: "#fff" },
@@ -228,14 +236,15 @@ function Login() {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
-function Dashboard({ suivi, depenses, ventes, vaccins, userInfo, bandeCfg }) {
+function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInfo, bandeCfg }) {
   const poussins = bandeCfg?.poussinsDepart || 450;
   const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
   const effectif = poussins - totalMorts;
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
-  const resultat = totalV - totalDep;
-  const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const totalCreditRecu = (credits || []).reduce((s, c) => s + Number(c.montantRecu || 0), 0);
+  const resultat = (totalV + totalCreditRecu) - totalDep;
+  const nbVendus = calcNbSortis(ventes, credits, sorties);
   const dateDebut = bandeCfg?.dateDebut || "2026-05-15";
   const joursEcoules = Math.max(Math.floor((new Date() - new Date(dateDebut)) / 86400000) + 1, 1);
   const semaine = Math.min(Math.ceil(joursEcoules / 7), 8);
@@ -308,7 +317,7 @@ function Dashboard({ suivi, depenses, ventes, vaccins, userInfo, bandeCfg }) {
         <div style={{ ...S.card, background: "linear-gradient(135deg, #0F2940, #1A4A7A)", color: "#fff" }}>
           <p style={{ fontSize: 11, opacity: 0.7, margin: "0 0 8px" }}>🎯 {bandeCfg?.objectif}</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", textAlign: "center", gap: 8 }}>
-            {[["Vendus", nbVendus], ["Restants", Math.max(effectif - nbVendus, 0)], ["Départ", poussins]].map(([l, v]) => (
+            {[["Sortis", nbVendus], ["Restants", Math.max(effectif - nbVendus, 0)], ["Départ", poussins]].map(([l, v]) => (
               <div key={l}><div style={{ fontSize: 20, fontWeight: 800 }}>{fmtN(v)}</div><div style={{ fontSize: 10, opacity: 0.65 }}>{l}</div></div>
             ))}
           </div>
@@ -444,6 +453,38 @@ function VenteCard({ v, canWrite, delVente, onEdit }) {
   );
 }
 
+// ── CARTE SORTIE (poulets sans paiement) ──────────────────────────
+const SORTIE_CAT_COLORS = { "Prélèvement associé": "#1A5276", "Don": "#1E8449", "Collaboration": "#E67E22", "Autre": "#888" };
+function SortieCard({ x, canWrite, delSortie, onEdit }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  const couleur = SORTIE_CAT_COLORS[x.categorie] || "#888";
+  return (
+    <div style={{ ...S.card, borderLeft: `4px solid ${couleur}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>{x.beneficiaire || "Non précisé"}</span>
+            <span style={S.tag(couleur)}>{x.categorie}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#888" }}>{x.nbPoulets} poulets • {x.date}</div>
+          {x.notes && <div style={{ fontSize: 11, color: "#888", fontStyle: "italic", marginTop: 2 }}>"{x.notes}"</div>}
+          <SigLine auteur={x.auteur} heureAction={x.heureAction} modifiePar={x.modifiePar} heureModif={x.heureModif} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          {canWrite && <button onClick={onEdit} style={S.btnIcon()}>✏️</button>}
+          {canWrite && !confirmDel && <button onClick={() => setConfirmDel(true)} style={S.btnIcon("#FFF0F0")}>🗑️</button>}
+        </div>
+      </div>
+      {canWrite && confirmDel && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <button onClick={() => delSortie(x.id)} style={{ ...S.btnSm("#C0392B"), flex: 1 }}>✅ Confirmer suppression</button>
+          <button onClick={() => setConfirmDel(false)} style={{ ...S.btnSm("#888"), flex: 1 }}>✕ Annuler</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── CARTE CRÉDIT (composant séparé pour éviter useState dans map) ─
 function CreditCard({ c, canWrite, marquerPayé, delCredit, creditStatutColor, creditStatutLabel }) {
   const [showPaiement, setShowPaiement] = useState(false);
@@ -516,6 +557,10 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
   const [credits, setCredits] = useState([]);
   const [bande1Data, setBande1Data] = useState(null);
   const [ventesBande1, setVentesBande1] = useState([]);
+  const [sorties, setSorties] = useState([]);
+  const [showSortie, setShowSortie] = useState(false);
+  const [sortieForm, setSortieForm] = useState({ date: "", nbPoulets: "", categorie: "Prélèvement associé", beneficiaire: "", notes: "" });
+  const [editSortieId, setEditSortieId] = useState(null);
 
   if (!PERMS[userInfo?.role]?.finances) return <AccessDenied />;
   const canWrite = WRITE_PERMS[userInfo?.role]?.finances;
@@ -530,7 +575,9 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
     // Ventes bande 1 séparées
     const q3 = query(collection(db, "samapoulet", "bande1", "ventes"), orderBy("createdAt", "desc"));
     const unsub3 = onSnapshot(q3, snap => setVentesBande1(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    return () => { unsub1(); unsub2(); unsub3(); };
+    const q4 = query(collection(db, "samapoulet", bandeActive, "sorties"), orderBy("createdAt", "desc"));
+    const unsub4 = onSnapshot(q4, snap => setSorties(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
   }, [bandeActive]);
 
   // Loyer supprimé - à saisir manuellement si besoin
@@ -629,6 +676,21 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
     setShowVenteBande1(false);
   };
 
+  const saveSortie = async () => {
+    if (!sortieForm.nbPoulets) return;
+    const data = { ...sortieForm, nbPoulets: Number(sortieForm.nbPoulets) };
+    if (editSortieId) {
+      await updateDoc(doc(db, "samapoulet", bandeActive, "sorties", editSortieId), { ...data, modifiePar: userInfo?.nom, heureModif: nowTime() });
+      setEditSortieId(null);
+    } else {
+      await addDoc(collection(db, "samapoulet", bandeActive, "sorties"), { ...data, ...makeSig(userInfo) });
+    }
+    setSortieForm({ date: "", nbPoulets: "", categorie: "Prélèvement associé", beneficiaire: "", notes: "" });
+    setShowSortie(false);
+  };
+
+  const delSortie = async (id) => { await deleteDoc(doc(db, "samapoulet", bandeActive, "sorties", id)); };
+
   const marquerPayé = async (credit, montantSupp) => {
     const newMontantRecu = Number(credit.montantRecu || 0) + Number(montantSupp || 0);
     const newResteDu = Number(credit.total || 0) - newMontantRecu;
@@ -725,7 +787,7 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
 
       {/* Onglets */}
       <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
-        {[["depenses", "💸 Dépenses"], ["ventes", "🛒 Ventes"], ["credits", `💳 Crédits${totalCreditDu > 0 ? ` (${credits.filter(c => c.statut !== "payé").length})` : ""}`], ["dividendes", "🤝 Dividendes"]].map(([id, label]) => (
+        {[["depenses", "💸 Dépenses"], ["ventes", "🛒 Ventes"], ["credits", `💳 Crédits${totalCreditDu > 0 ? ` (${credits.filter(c => c.statut !== "payé").length})` : ""}`], ["sorties", `📤 Sorties${sorties.length > 0 ? ` (${sorties.length})` : ""}`], ["dividendes", "🤝 Dividendes"]].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)} style={{ flexShrink: 0, padding: "8px 12px", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 11, cursor: "pointer", background: tab === id ? "#0F2940" : "#E8ECF0", color: tab === id ? "#fff" : "#666" }}>{label}</button>
         ))}
       </div>
@@ -804,6 +866,27 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
           : credits.map(c => (
             <CreditCard key={c.id} c={c} canWrite={canWrite} marquerPayé={marquerPayé} delCredit={delCredit}
               creditStatutColor={creditStatutColor} creditStatutLabel={creditStatutLabel} />
+          ))
+        }
+      </>}
+
+      {tab === "sorties" && <>
+        <div style={S.alert("#6C3483")}>
+          <span style={{ fontSize: 12, color: "#6C3483" }}>📤 Poulets qui sortent sans paiement : prélèvements des associés, dons, collaborations... Ils sont déduits de l'effectif mais n'apportent aucune recette.</span>
+        </div>
+        {canWrite && <button onClick={() => { setEditSortieId(null); setSortieForm({ date: "", nbPoulets: "", categorie: "Prélèvement associé", beneficiaire: "", notes: "" }); setShowSortie(true); }} style={S.btn("#6C3483")}>+ Enregistrer une sortie</button>}
+        {!canWrite && <div style={S.alert("#AAB7B8")}><span style={{ color: "#888" }}>👁️ Lecture seule</span></div>}
+
+        {sorties.length > 0 && (
+          <div style={S.kpi("#6C3483")}><div style={S.kpiVal}>{fmtN(sorties.reduce((s, x) => s + Number(x.nbPoulets || 0), 0))}</div><div style={S.kpiLbl}>Total poulets sortis sans paiement</div></div>
+        )}
+        <div style={{ height: 10 }} />
+
+        {sorties.length === 0
+          ? <div style={{ ...S.card, textAlign: "center", padding: 24, color: "#AAB7B8" }}><div style={{ fontSize: 36 }}>📤</div><p>Aucune sortie enregistrée</p></div>
+          : sorties.map(x => (
+            <SortieCard key={x.id} x={x} canWrite={canWrite} delSortie={delSortie}
+              onEdit={() => { setSortieForm({ date: x.date, nbPoulets: x.nbPoulets, categorie: x.categorie, beneficiaire: x.beneficiaire || "", notes: x.notes || "" }); setEditSortieId(x.id); setShowSortie(true); }} />
           ))
         }
       </>}
@@ -933,6 +1016,22 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
             </>
           )}
           <button onClick={updateStock} style={S.btn("#1A5276")}>✅ Mettre à jour</button>
+        </Modal>
+      )}
+
+      {showSortie && (
+        <Modal title={editSortieId ? "✏️ Modifier la sortie" : "📤 Sortie sans paiement"} onClose={() => { setShowSortie(false); setEditSortieId(null); }}>
+          <div style={S.alert("#6C3483")}>
+            <span style={{ fontSize: 12, color: "#6C3483" }}>Ces poulets seront déduits de l'effectif mais n'apporteront aucune recette.</span>
+          </div>
+          <Field label="Date" type="date" val={sortieForm.date} set={v => setSortieForm(p => ({ ...p, date: v }))} />
+          <Field label="Catégorie" val={sortieForm.categorie} set={v => setSortieForm(p => ({ ...p, categorie: v }))}
+            options={["Prélèvement associé", "Don", "Collaboration", "Autre"]} />
+          <Field label="Bénéficiaire (ex: Alune, Laye, Daff, nom...)" type="text" val={sortieForm.beneficiaire} set={v => setSortieForm(p => ({ ...p, beneficiaire: v }))} />
+          <Field label="Nombre de poulets" type="number" val={sortieForm.nbPoulets} set={v => setSortieForm(p => ({ ...p, nbPoulets: v }))} />
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 2 }}>Notes</label>
+          <textarea value={sortieForm.notes} onChange={e => setSortieForm(p => ({ ...p, notes: e.target.value }))} style={{ ...S.input, height: 60, resize: "none" }} placeholder="Ex: Tamkharite, anniversaire..." />
+          <button onClick={saveSortie} style={S.btn("#6C3483")}>{editSortieId ? "✅ Modifier" : "✅ Enregistrer la sortie"}</button>
         </Modal>
       )}
     </div>
@@ -1319,7 +1418,7 @@ function GestionBandes({ bandes, bandeActive, setBandeActive, userInfo }) {
 }
 
 // ── GRAPHIQUES & ANALYTICS ────────────────────────────────────────
-function Analytics({ suivi, depenses, ventes, bandeCfg }) {
+function Analytics({ suivi, depenses, ventes, credits, sorties, bandeCfg }) {
   const poussins = bandeCfg?.poussinsDepart || 450;
 
   // Données mortalité par semaine
@@ -1353,6 +1452,7 @@ function Analytics({ suivi, depenses, ventes, bandeCfg }) {
   const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
   const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const nbSortis = calcNbSortis(ventes, credits, sorties);
   const prixMoyen = nbVendus > 0 ? totalV / nbVendus : 0;
 
   return (
@@ -1372,11 +1472,11 @@ function Analytics({ suivi, depenses, ventes, bandeCfg }) {
       </div>
       <div style={S.kpiRow}>
         <div style={S.kpi("#784212")}>
-          <div style={S.kpiVal}>{fmtN(nbVendus)}</div>
-          <div style={S.kpiLbl}>Poulets vendus</div>
+          <div style={S.kpiVal}>{fmtN(nbSortis)}</div>
+          <div style={S.kpiLbl}>Poulets sortis</div>
         </div>
         <div style={S.kpi("#0F2940")}>
-          <div style={S.kpiVal}>{fmtN(poussins - totalMorts - nbVendus)}</div>
+          <div style={S.kpiVal}>{fmtN(poussins - totalMorts - nbSortis)}</div>
           <div style={S.kpiLbl}>Restants</div>
         </div>
       </div>
@@ -1818,14 +1918,15 @@ function Chat({ userInfo }) {
 }
 
 // ── RAPPORT HEBDOMADAIRE ──────────────────────────────────────────
-function Rapport({ suivi, depenses, ventes, vaccins, bandeCfg, incidents }) {
+function Rapport({ suivi, depenses, ventes, credits, sorties, vaccins, bandeCfg, incidents }) {
   const poussins = bandeCfg?.poussinsDepart || 450;
   const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
   const effectif = poussins - totalMorts;
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
-  const resultat = totalV - totalDep;
-  const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const totalCreditRecu = (credits || []).reduce((s, c) => s + Number(c.montantRecu || 0), 0);
+  const resultat = (totalV + totalCreditRecu) - totalDep;
+  const nbVendus = calcNbSortis(ventes, credits, sorties);
   const vaccsRestants = vaccins.filter(v => !v.fait).length;
   const stock = bandeCfg?.stockAliments || 0;
   const dateDebut = bandeCfg?.dateDebut || "2026-05-15";
@@ -1839,7 +1940,7 @@ function Rapport({ suivi, depenses, ventes, vaccins, bandeCfg, incidents }) {
   const incidents7j = (incidents || []).filter(i => new Date(i.date) >= il7Jours);
 
   const copyRapport = () => {
-    const txt = `🐓 RAPPORT SAMA POULET — Semaine ${semaine}\n📅 ${new Date().toLocaleDateString("fr-FR")}\n\n📊 BANDE EN COURS\n• Poussins départ : ${fmtN(poussins)}\n• Effectif actuel : ${fmtN(effectif)}\n• Morts totaux : ${fmtN(totalMorts)} (${((totalMorts/poussins)*100).toFixed(1)}%)\n• Vendus : ${fmtN(nbVendus)}\n• Restants : ${fmtN(effectif - nbVendus)}\n\n📅 CETTE SEMAINE\n• Morts : ${morts7j}\n• Ventes : ${fmt(ca7j)} (${ventes7j.length} transactions)\n• Incidents : ${incidents7j.length}\n\n💰 FINANCES\n• Investissement : ${fmt(totalDep)}\n• CA total : ${fmt(totalV)}\n• Résultat : ${resultat >= 0 ? "✅" : "❌"} ${fmt(Math.abs(resultat))}\n\n📦 STOCK ALIMENTS : ${fmtN(stock)} kg ${stock < 50 ? "⚠️ CRITIQUE" : "✅"}\n💉 VACCINATIONS RESTANTES : ${vaccsRestants}\n\nGénéré par Sama Poulet v2.2`;
+    const txt = `🐓 RAPPORT SAMA POULET — Semaine ${semaine}\n📅 ${new Date().toLocaleDateString("fr-FR")}\n\n📊 BANDE EN COURS\n• Poussins départ : ${fmtN(poussins)}\n• Effectif actuel : ${fmtN(effectif)}\n• Morts totaux : ${fmtN(totalMorts)} (${((totalMorts/poussins)*100).toFixed(1)}%)\n• Sortis (vendus+crédits+dons) : ${fmtN(nbVendus)}\n• Restants : ${fmtN(effectif - nbVendus)}\n\n📅 CETTE SEMAINE\n• Morts : ${morts7j}\n• Ventes : ${fmt(ca7j)} (${ventes7j.length} transactions)\n• Incidents : ${incidents7j.length}\n\n💰 FINANCES\n• Investissement : ${fmt(totalDep)}\n• CA total : ${fmt(totalV)}\n• Résultat : ${resultat >= 0 ? "✅" : "❌"} ${fmt(Math.abs(resultat))}\n\n📦 STOCK ALIMENTS : ${fmtN(stock)} kg ${stock < 50 ? "⚠️ CRITIQUE" : "✅"}\n💉 VACCINATIONS RESTANTES : ${vaccsRestants}\n\nGénéré par Sama Poulet v2.4`;
     navigator.clipboard.writeText(txt).then(() => alert("✅ Rapport copié ! Collez dans WhatsApp."));
   };
 
@@ -2000,14 +2101,15 @@ function GaleriePhotos({ userInfo, bandeActive }) {
 }
 
 // ── EXPORT PDF ────────────────────────────────────────────────────
-function ExportPDF({ suivi, depenses, ventes, vaccins, bandeCfg, incidents, userInfo }) {
+function ExportPDF({ suivi, depenses, ventes, credits, sorties, vaccins, bandeCfg, incidents, userInfo }) {
   const poussins = bandeCfg?.poussinsDepart || 450;
   const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
   const effectif = poussins - totalMorts;
   const totalDep = depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
   const totalV = ventes.reduce((s, v) => s + Number(v.total || 0), 0);
-  const resultat = totalV - totalDep;
-  const nbVendus = ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0);
+  const totalCreditRecu = (credits || []).reduce((s, c) => s + Number(c.montantRecu || 0), 0);
+  const resultat = (totalV + totalCreditRecu) - totalDep;
+  const nbVendus = calcNbSortis(ventes, credits, sorties);
   const dateDebut = bandeCfg?.dateDebut || "2026-05-15";
   const joursEcoules = Math.max(Math.floor((new Date() - new Date(dateDebut)) / 86400000) + 1, 1);
   const semaine = Math.min(Math.ceil(joursEcoules / 7), 8);
@@ -2160,6 +2262,8 @@ export default function App() {
   const [ventes, setVentes] = useState([]);
   const [vaccins, setVaccins] = useState([]);
   const [incidents, setIncidents] = useState([]);
+  const [credits, setCredits] = useState([]);
+  const [sorties, setSorties] = useState([]);
   const [phases, setPhases] = useState(PHASES_INIT);
   const [presences, setPresences] = useState({});
 
@@ -2221,6 +2325,12 @@ export default function App() {
 
     const q3 = query(collection(db, "samapoulet", bandeActive, "ventes"), orderBy("createdAt", "desc"));
     unsubs.push(onSnapshot(q3, s => setVentes(s.docs.map(d => ({ id: d.id, ...d.data() })))));
+
+    const q3b = query(collection(db, "samapoulet", bandeActive, "credits"), orderBy("createdAt", "desc"));
+    unsubs.push(onSnapshot(q3b, s => setCredits(s.docs.map(d => ({ id: d.id, ...d.data() })))));
+
+    const q3c = query(collection(db, "samapoulet", bandeActive, "sorties"), orderBy("createdAt", "desc"));
+    unsubs.push(onSnapshot(q3c, s => setSorties(s.docs.map(d => ({ id: d.id, ...d.data() })))));
 
     unsubs.push(onSnapshot(collection(db, "samapoulet", bandeActive, "vaccinations"), async snap => {
       if (snap.empty) {
@@ -2285,14 +2395,14 @@ export default function App() {
         </div>
       )}
 
-      {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} />}
+      {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} />}
       {tab === "suivi" && <SuiviQuotidien suivi={suivi} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} />}
       {tab === "finances" && <Finances depenses={depenses} ventes={ventes} userInfo={userInfo} bandeActive={bandeActive} bandeCfg={bandeCfg} setBandeCfg={setBandeCfg} />}
-      {tab === "analytics" && <Analytics suivi={suivi} depenses={depenses} ventes={ventes} bandeCfg={bandeCfg} />}
+      {tab === "analytics" && <Analytics suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} bandeCfg={bandeCfg} />}
       {tab === "calcul" && <Calculateur depenses={depenses} suivi={suivi} bandeCfg={bandeCfg} />}
-      {tab === "rapport" && <Rapport suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} bandeCfg={bandeCfg} incidents={incidents} />}
+      {tab === "rapport" && <Rapport suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} vaccins={vaccins} bandeCfg={bandeCfg} incidents={incidents} />}
       {tab === "photos" && <GaleriePhotos userInfo={userInfo} bandeActive={bandeActive} />}
-      {tab === "export" && <ExportPDF suivi={suivi} depenses={depenses} ventes={ventes} vaccins={vaccins} bandeCfg={bandeCfg} incidents={incidents} userInfo={userInfo} />}
+      {tab === "export" && <ExportPDF suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} vaccins={vaccins} bandeCfg={bandeCfg} incidents={incidents} userInfo={userInfo} />}
       {tab === "chat" && <Chat userInfo={userInfo} />}
       {tab === "clients" && <Clients userInfo={userInfo} bandeActive={bandeActive} ventes={ventes} />}
       {tab === "fournisseurs" && <Fournisseurs userInfo={userInfo} />}
