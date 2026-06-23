@@ -236,7 +236,7 @@ function Login() {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
-function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInfo, bandeCfg, bandeActive }) {
+function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInfo, bandeCfg, bandeActive, bandes, donneesGlobales, setTab, setShowVenteRapide }) {
   const poussins = bandeCfg?.poussinsDepart || 450;
   const totalMorts = suivi.reduce((s, j) => s + Number(j.morts || 0), 0);
   const effectif = poussins - totalMorts;
@@ -273,6 +273,59 @@ function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInf
           </div>
         </div>
       </div>
+
+      {/* ── Grille d'actions rapides ────────────────────────────── */}
+      <div style={{ padding: "16px 16px 0" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+          {[
+            { icon: "⚡", label: "Vente", action: () => setShowVenteRapide && setShowVenteRapide(true), color: "#1E8449", show: WRITE_PERMS[userInfo?.role]?.finances },
+            { icon: "🐔", label: "Suivi", action: () => setTab && setTab("suivi"), color: "#1A5276", show: WRITE_PERMS[userInfo?.role]?.suivi || PERMS[userInfo?.role]?.suivi },
+            { icon: "💸", label: "Dépense", action: () => setTab && setTab("finances"), color: "#C0392B", show: WRITE_PERMS[userInfo?.role]?.finances },
+            { icon: "📦", label: "Stock", action: () => setTab && setTab("finances"), color: "#E67E22", show: true },
+            { icon: "💉", label: "Santé", action: () => setTab && setTab("sante"), color: "#6C3483", show: PERMS[userInfo?.role]?.sante },
+            { icon: "💬", label: "Chat", action: () => setTab && setTab("chat"), color: "#1A5276", show: true },
+            { icon: "📈", label: "Stats", action: () => setTab && setTab("analytics"), color: "#784212", show: true },
+            { icon: "☰", label: "Plus", action: () => setTab && setTab("more"), color: "#888", show: true },
+          ].filter(a => a.show).map(a => (
+            <div key={a.label} onClick={a.action} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <div style={{ width: 54, height: 54, borderRadius: 27, background: a.color + "1A", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>
+                {a.icon}
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#0F2940" }}>{a.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Historique unifié — bande active ───────────────────── */}
+      {(() => {
+        const histo = [
+          ...ventes.map(v => ({ ...v, _type: "vente", _label: v.client, _montant: Number(v.total || 0), _sens: "+" })),
+          ...(credits || []).map(c => ({ ...c, _type: "credit", _label: c.client + (c.statut !== "payé" ? ` (${c.statut})` : ""), _montant: Number(c.montantRecu || 0), _sens: c.montantRecu > 0 ? "+" : "·" })),
+          ...depenses.map(d => ({ ...d, _type: "depense", _label: d.description || d.categorie, _montant: Number(d.montant || 0), _sens: "-" })),
+          ...(sorties || []).map(x => ({ ...x, _type: "sortie", _label: `${x.beneficiaire || x.categorie} (sortie)`, _montant: 0, _sens: "·" })),
+        ].filter(h => h.createdAt).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 8);
+
+        return (
+          <div style={{ padding: "20px 16px 0" }}>
+            <p style={{ fontSize: 13, fontWeight: 800, color: "#0F2940", margin: "0 0 10px" }}>🐔 Activité — {bandeActive === "bande2" ? "Bande 2" : bandeActive === "bande1" ? "Bande 1" : bandeActive}</p>
+            {histo.length === 0
+              ? <p style={{ fontSize: 12, color: "#AAB7B8", textAlign: "center", padding: "20px 0" }}>Aucune activité encore</p>
+              : histo.map((h, i) => (
+                <div key={h.id + i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F0F4F8" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#0F2940" }}>{h._label}</div>
+                    <div style={{ fontSize: 11, color: "#AAB7B8" }}>{h.date} {h.heureAction ? `à ${h.heureAction}` : ""}</div>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: h._sens === "+" ? "#1E8449" : h._sens === "-" ? "#C0392B" : "#AAB7B8" }}>
+                    {h._sens === "+" ? "+" : h._sens === "-" ? "-" : ""}{h._montant > 0 ? fmt(h._montant) : "—"}
+                  </span>
+                </div>
+              ))
+            }
+          </div>
+        );
+      })()}
 
       <div style={S.section}>
         {userInfo?.role === "admin" && (
@@ -367,6 +420,68 @@ function Dashboard({ suivi, depenses, ventes, credits, sorties, vaccins, userInf
           ))}
         </div>
       </div>
+
+      {/* ── VUE GÉNÉRALE — toutes bandes confondues ─────────────── */}
+      {(() => {
+        if (!donneesGlobales || donneesGlobales.loading) return null;
+        const gVentes = donneesGlobales.ventes || [];
+        const gDepenses = donneesGlobales.depenses || [];
+        const gCredits = donneesGlobales.credits || [];
+        const gSorties = donneesGlobales.sorties || [];
+
+        const gTotalV = gVentes.reduce((s, v) => s + Number(v.total || 0), 0);
+        const gTotalCreditRecu = gCredits.reduce((s, c) => s + Number(c.montantRecu || 0), 0);
+        const gTotalDep = gDepenses.reduce((s, d) => s + Number(d.montant || 0), 0);
+        const gResultat = (gTotalV + gTotalCreditRecu) - gTotalDep;
+        const gNbSortis = calcNbSortis(gVentes, gCredits, gSorties);
+        const gCreditDu = gCredits.filter(c => c.statut !== "payé").reduce((s, c) => s + (Number(c.total || 0) - Number(c.montantRecu || 0)), 0);
+
+        const histoGlobal = [
+          ...gVentes.map(v => ({ ...v, _label: v.client, _montant: Number(v.total || 0), _sens: "+" })),
+          ...gDepenses.map(d => ({ ...d, _label: d.description || d.categorie, _montant: Number(d.montant || 0), _sens: "-" })),
+        ].filter(h => h.createdAt).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 6);
+
+        return (
+          <div style={{ ...S.section, marginTop: 8 }}>
+            <p style={{ fontSize: 15, fontWeight: 800, color: "#0F2940", margin: "0 0 12px" }}>🌍 Vue générale — Toutes les bandes ({bandes?.length || 0})</p>
+
+            <div style={{ ...S.card, background: "linear-gradient(135deg, #2C3E50, #4A6378)", color: "#fff" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", textAlign: "center", gap: 8 }}>
+                {[["Dépenses", fmt(gTotalDep), "#FF6B6B"], ["Recettes", fmt(gTotalV + gTotalCreditRecu), "#51CF66"], ["Résultat", fmt(Math.abs(gResultat)), gResultat >= 0 ? "#51CF66" : "#FF6B6B"]].map(([l, v, c]) => (
+                  <div key={l}><div style={{ fontSize: 13, fontWeight: 800, color: c }}>{v}</div><div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{l}</div></div>
+                ))}
+              </div>
+              <div style={{ textAlign: "center", marginTop: 10, fontSize: 13, fontWeight: 700, color: gResultat >= 0 ? "#51CF66" : "#FF6B6B" }}>
+                {gResultat >= 0 ? "✅ Bénéfice global" : "❌ Perte globale"} : {fmt(Math.abs(gResultat))}
+              </div>
+              {gCreditDu > 0 && <div style={{ textAlign: "center", marginTop: 6, fontSize: 11, color: "#FCC419" }}>⚠️ Créances en attente : {fmt(gCreditDu)}</div>}
+            </div>
+
+            <div style={S.kpiRow}>
+              <div style={S.kpi("#1A5276")}><div style={S.kpiVal}>{fmtN(gNbSortis)}</div><div style={S.kpiLbl}>Poulets sortis (toutes bandes)</div></div>
+              <div style={S.kpi("#784212")}><div style={S.kpiVal}>{bandes?.length || 0}</div><div style={S.kpiLbl}>Bandes au total</div></div>
+            </div>
+
+            <div style={S.card}>
+              <p style={S.cardTitle}>📋 Dernières activités (toutes bandes)</p>
+              {histoGlobal.length === 0
+                ? <p style={{ fontSize: 12, color: "#AAB7B8", textAlign: "center", padding: "10px 0" }}>Aucune activité</p>
+                : histoGlobal.map((h, i) => (
+                  <div key={(h.id || i) + "_g"} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F0F4F8" }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#0F2940" }}>{h._label}</div>
+                      <div style={{ fontSize: 10, color: "#AAB7B8" }}>{h.date} • {h._bandeNumero ? `Bande ${h._bandeNumero}` : h._bande}</div>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: h._sens === "+" ? "#1E8449" : "#C0392B" }}>
+                      {h._sens}{fmt(h._montant)}
+                    </span>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2442,6 +2557,7 @@ export default function App() {
   const [sorties, setSorties] = useState([]);
   const [phases, setPhases] = useState(PHASES_INIT);
   const [presences, setPresences] = useState({});
+  const [donneesGlobales, setDonneesGlobales] = useState({ ventes: [], depenses: [], credits: [], sorties: [], loading: true });
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
@@ -2526,6 +2642,40 @@ export default function App() {
     return () => unsubs.forEach(u => u());
   }, [user, bandeActive]);
 
+  // Vue générale — agrège ventes/dépenses/credits/sorties de TOUTES les bandes
+  useEffect(() => {
+    if (!user || bandes.length === 0) return;
+    const unsubs = [];
+    const parBande = {}; // { bandeId: { ventes, depenses, credits, sorties } }
+
+    const recalc = () => {
+      const merge = (champ) => bandes.flatMap(b => (parBande[b.id]?.[champ] || []).map(item => ({ ...item, _bande: b.id, _bandeNumero: b.numero })));
+      setDonneesGlobales({
+        ventes: merge("ventes"), depenses: merge("depenses"),
+        credits: merge("credits"), sorties: merge("sorties"),
+        loading: false,
+      });
+    };
+
+    bandes.forEach(b => {
+      parBande[b.id] = parBande[b.id] || {};
+      unsubs.push(onSnapshot(collection(db, "samapoulet", b.id, "ventes"), snap => {
+        parBande[b.id].ventes = snap.docs.map(d => ({ id: d.id, ...d.data() })); recalc();
+      }));
+      unsubs.push(onSnapshot(collection(db, "samapoulet", b.id, "depenses"), snap => {
+        parBande[b.id].depenses = snap.docs.map(d => ({ id: d.id, ...d.data() })); recalc();
+      }));
+      unsubs.push(onSnapshot(collection(db, "samapoulet", b.id, "credits"), snap => {
+        parBande[b.id].credits = snap.docs.map(d => ({ id: d.id, ...d.data() })); recalc();
+      }));
+      unsubs.push(onSnapshot(collection(db, "samapoulet", b.id, "sorties"), snap => {
+        parBande[b.id].sorties = snap.docs.map(d => ({ id: d.id, ...d.data() })); recalc();
+      }));
+    });
+
+    return () => unsubs.forEach(u => u());
+  }, [user, bandes]);
+
   if (loading) return (
     <div style={{ minHeight: "100vh", background: "#0F2940", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
       <div style={{ fontSize: 60 }}>🐓</div>
@@ -2571,7 +2721,7 @@ export default function App() {
         </div>
       )}
 
-      {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} />}
+      {tab === "dashboard" && <Dashboard suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} vaccins={vaccins} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} bandes={bandes} donneesGlobales={donneesGlobales} setTab={setTab} setShowVenteRapide={setShowVenteRapide} />}
       {tab === "suivi" && <SuiviQuotidien suivi={suivi} userInfo={userInfo} bandeCfg={bandeCfg} bandeActive={bandeActive} />}
       {tab === "finances" && <Finances depenses={depenses} ventes={ventes} userInfo={userInfo} bandeActive={bandeActive} bandeCfg={bandeCfg} setBandeCfg={setBandeCfg} />}
       {tab === "analytics" && <Analytics suivi={suivi} depenses={depenses} ventes={ventes} credits={credits} sorties={sorties} bandeCfg={bandeCfg} />}
