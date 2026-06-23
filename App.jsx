@@ -538,6 +538,110 @@ function CreditCard({ c, canWrite, marquerPayé, delCredit, creditStatutColor, c
   );
 }
 
+// ── VENTE RAPIDE (mode Tamkharite) ────────────────────────────────
+const CLIENTS_RAPIDES = ["Particulier", "Eggette", "Bana-bana", "Voisin"];
+function VenteRapide({ userInfo, bandeActive, onClose }) {
+  const [nbPoulets, setNbPoulets] = useState("");
+  const [prixUnit, setPrixUnit] = useState("3500");
+  const [client, setClient] = useState("");
+  const [typePaiement, setTypePaiement] = useState("comptant");
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const total = (Number(nbPoulets) || 0) * (Number(prixUnit) || 0);
+
+  const enregistrer = async () => {
+    if (!nbPoulets || !prixUnit) return;
+    setSaving(true);
+    const data = {
+      date: new Date().toLocaleDateString("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit" }).split("/").reverse().join("-"),
+      client: client || "Particulier", canal: "Vente directe",
+      nbPoulets: Number(nbPoulets), prixUnit: Number(prixUnit), total,
+    };
+    if (typePaiement === "credit") {
+      await addDoc(collection(db, "samapoulet", bandeActive, "credits"), {
+        ...data, montantRecu: 0, resteDu: total, statut: "impayé", ...makeSig(userInfo)
+      });
+    } else {
+      await addDoc(collection(db, "samapoulet", bandeActive, "ventes"), { ...data, ...makeSig(userInfo) });
+    }
+    setSaving(false);
+    setSuccess(true);
+    setTimeout(() => {
+      setNbPoulets(""); setClient(""); setTypePaiement("comptant"); setSuccess(false);
+    }, 1200);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,41,64,0.95)", zIndex: 400, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "16px 16px 8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ color: "#C9A84C", fontWeight: 800, fontSize: 18 }}>⚡ Vente Rapide</span>
+        <button onClick={onClose} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 20, width: 36, height: 36, color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 20px" }}>
+        {success ? (
+          <div style={{ textAlign: "center", marginTop: 80 }}>
+            <div style={{ fontSize: 70 }}>✅</div>
+            <p style={{ color: "#fff", fontWeight: 800, fontSize: 20, marginTop: 10 }}>Vente enregistrée !</p>
+          </div>
+        ) : (
+          <>
+            <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginBottom: 6 }}>Nombre de poulets</p>
+            <input type="number" value={nbPoulets} onChange={e => setNbPoulets(e.target.value)} autoFocus
+              placeholder="0" inputMode="numeric"
+              style={{ width: "100%", fontSize: 48, fontWeight: 800, textAlign: "center", background: "rgba(255,255,255,0.1)", border: "2px solid rgba(255,255,255,0.2)", borderRadius: 16, color: "#fff", padding: "16px 0", boxSizing: "border-box", marginBottom: 16, outline: "none" }} />
+
+            <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginBottom: 6 }}>Prix unitaire (FCFA)</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              {[3000, 3500, 4000, 4500].map(p => (
+                <button key={p} onClick={() => setPrixUnit(String(p))}
+                  style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: `2px solid ${prixUnit === String(p) ? "#C9A84C" : "rgba(255,255,255,0.2)"}`, background: prixUnit === String(p) ? "#C9A84C" : "rgba(255,255,255,0.1)", color: prixUnit === String(p) ? "#0F2940" : "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                  {p}
+                </button>
+              ))}
+            </div>
+            <input type="number" value={prixUnit} onChange={e => setPrixUnit(e.target.value)} placeholder="Prix personnalisé" inputMode="numeric"
+              style={{ width: "100%", fontSize: 16, textAlign: "center", background: "rgba(255,255,255,0.1)", border: "1.5px solid rgba(255,255,255,0.2)", borderRadius: 10, color: "#fff", padding: "10px 0", boxSizing: "border-box", marginBottom: 16, outline: "none" }} />
+
+            <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginBottom: 6 }}>Client (optionnel)</p>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+              {CLIENTS_RAPIDES.map(c => (
+                <button key={c} onClick={() => setClient(c)}
+                  style={{ padding: "6px 12px", borderRadius: 16, border: `1.5px solid ${client === c ? "#C9A84C" : "rgba(255,255,255,0.25)"}`, background: client === c ? "#C9A84C" : "transparent", color: client === c ? "#0F2940" : "#fff", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>
+                  {c}
+                </button>
+              ))}
+            </div>
+            <input type="text" value={client} onChange={e => setClient(e.target.value)} placeholder="Nom du client"
+              style={{ width: "100%", fontSize: 15, background: "rgba(255,255,255,0.1)", border: "1.5px solid rgba(255,255,255,0.2)", borderRadius: 10, color: "#fff", padding: "10px 12px", boxSizing: "border-box", marginBottom: 16, outline: "none" }} />
+
+            <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginBottom: 6 }}>Paiement</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              {[["comptant", "💵 Payé maintenant"], ["credit", "💳 À crédit"]].map(([val, label]) => (
+                <button key={val} onClick={() => setTypePaiement(val)}
+                  style={{ flex: 1, padding: "12px", borderRadius: 12, border: `2px solid ${typePaiement === val ? "#1E8449" : "rgba(255,255,255,0.2)"}`, background: typePaiement === val ? "#1E8449" : "rgba(255,255,255,0.1)", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ background: "rgba(255,255,255,0.1)", borderRadius: 14, padding: "16px", textAlign: "center", marginBottom: 16 }}>
+              <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, margin: "0 0 4px" }}>TOTAL</p>
+              <p style={{ color: "#C9A84C", fontSize: 32, fontWeight: 900, margin: 0 }}>{fmt(total)}</p>
+            </div>
+
+            <button onClick={enregistrer} disabled={!nbPoulets || !prixUnit || saving}
+              style={{ width: "100%", padding: "18px", borderRadius: 16, border: "none", background: !nbPoulets || !prixUnit ? "rgba(255,255,255,0.2)" : "#1E8449", color: "#fff", fontWeight: 800, fontSize: 17, cursor: !nbPoulets || !prixUnit ? "default" : "pointer" }}>
+              {saving ? "⏳ Enregistrement..." : "✅ ENREGISTRER LA VENTE"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── FINANCES ──────────────────────────────────────────────────────
 function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeCfg }) {
   const [tab, setTab] = useState("depenses");
@@ -695,10 +799,21 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
     const newMontantRecu = Number(credit.montantRecu || 0) + Number(montantSupp || 0);
     const newResteDu = Number(credit.total || 0) - newMontantRecu;
     const newStatut = newResteDu <= 0 ? "payé" : "partiel";
-    await updateDoc(doc(db, "samapoulet", bandeActive, "credits", credit.id), {
-      montantRecu: newMontantRecu, resteDu: Math.max(newResteDu, 0), statut: newStatut,
-      modifiePar: userInfo?.nom, heureModif: nowTime()
-    });
+
+    if (newStatut === "payé") {
+      // Transfert intégral vers ventes, puis suppression du crédit
+      const { id, montantRecu, resteDu, statut, createdAt, ...rest } = credit;
+      await addDoc(collection(db, "samapoulet", bandeActive, "ventes"), {
+        ...rest, total: credit.total, notes: "Crédit soldé",
+        ...makeSig(userInfo)
+      });
+      await deleteDoc(doc(db, "samapoulet", bandeActive, "credits", credit.id));
+    } else {
+      await updateDoc(doc(db, "samapoulet", bandeActive, "credits", credit.id), {
+        montantRecu: newMontantRecu, resteDu: Math.max(newResteDu, 0), statut: newStatut,
+        modifiePar: userInfo?.nom, heureModif: nowTime()
+      });
+    }
   };
 
   const delDep = async (id) => { if (window.confirm("Supprimer ?")) await deleteDoc(doc(db, "samapoulet", bandeActive, "depenses", id)); };
@@ -723,6 +838,42 @@ function Finances({ depenses, ventes, userInfo, bandeActive, bandeCfg, setBandeC
           {resultat >= 0 ? "✅ Bénéfice" : "❌ Perte"} : {fmt(Math.abs(resultat))}
         </div>
         {totalCreditDu > 0 && <div style={{ textAlign: "center", marginTop: 6, fontSize: 11, color: "#FCC419" }}>⚠️ Créances en attente : {fmt(totalCreditDu)}</div>}
+      </div>
+
+      {/* Bande active (bande2) — résumé détaillé */}
+      <div style={{ ...S.card, border: "1.5px solid #1A5276", background: "#EBF5FB" }}>
+        <p style={{ ...S.cardTitle, marginBottom: 8, color: "#1A5276" }}>🐔 {bandeActive === "bande2" ? "Bande 2" : bandeActive} — Ventes</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#1E8449" }}>{fmtN(ventes.reduce((s, v) => s + Number(v.nbPoulets || 0), 0) + credits.reduce((s, c) => s + Number(c.nbPoulets || 0), 0))}</div>
+            <div style={{ fontSize: 10, color: "#888" }}>Poulets vendus</div>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#1A5276" }}>{fmt(totalV)}</div>
+            <div style={{ fontSize: 10, color: "#888" }}>CA encaissé</div>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: totalCreditDu > 0 ? "#C0392B" : "#AAB7B8" }}>{fmt(totalCreditDu)}</div>
+            <div style={{ fontSize: 10, color: "#888" }}>Reste à recevoir</div>
+          </div>
+        </div>
+        {ventes.length > 0 && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, color: "#1A5276", margin: "0 0 6px" }}>Ventes récentes :</p>
+            {ventes.slice(0, 3).map(v => (
+              <div key={v.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #DCEEF8" }}>
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{v.client}</span>
+                  <span style={{ fontSize: 11, color: "#888" }}> • {v.nbPoulets} poulets • {v.date}</span>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "#1E8449" }}>{fmt(v.total)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {ventes.length === 0 && credits.length === 0 && (
+          <p style={{ fontSize: 12, color: "#888", textAlign: "center", margin: 0 }}>Aucune vente enregistrée pour cette bande</p>
+        )}
       </div>
 
       {/* Bande 1 solde */}
@@ -2254,6 +2405,7 @@ export default function App() {
   const [userInfo, setUserInfo] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [loading, setLoading] = useState(true);
+  const [showVenteRapide, setShowVenteRapide] = useState(false);
   const [bandeActive, setBandeActive] = useState("bande2");
   const [bandes, setBandes] = useState([]);
   const [bandeCfg, setBandeCfg] = useState({ dateDebut: "2026-05-15", poussinsDepart: 450, objectif: "Tamkharite ~25 Juin 2026", stockAliments: 0 });
@@ -2443,6 +2595,18 @@ export default function App() {
           );
         })}
       </div>
+
+      {/* Bouton flottant Vente Rapide */}
+      {WRITE_PERMS[userInfo?.role]?.finances && (
+        <button onClick={() => setShowVenteRapide(true)}
+          style={{ position: "fixed", bottom: 86, right: 16, zIndex: 150, width: 58, height: 58, borderRadius: 29, background: "linear-gradient(135deg, #1E8449, #27AE60)", border: "none", boxShadow: "0 4px 16px rgba(30,132,73,0.5)", color: "#fff", fontSize: 26, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          ⚡
+        </button>
+      )}
+
+      {showVenteRapide && (
+        <VenteRapide userInfo={userInfo} bandeActive={bandeActive} onClose={() => setShowVenteRapide(false)} />
+      )}
     </div>
   );
 }
